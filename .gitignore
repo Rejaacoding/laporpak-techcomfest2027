@@ -1,0 +1,18 @@
+﻿# Environment variables (WAJIB DIKUNCI)
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Dependencies & Build Output
+node_modules/
+dist/
+build/
+.vercel/
+.next/
+
+# Logs & OS Files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
