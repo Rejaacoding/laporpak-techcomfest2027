@@ -1,7 +1,7 @@
 ﻿# LaporPAK! — Sistem Audit & Pelaporan Infrastruktur Publik Dua Arah Berbasis Peta
 
 > **Tautan Simulasi Dewan Juri (Techcomfest 2027):**  
-> `https://[URL-VERCEL-TIM].vercel.app/?jury_token=laporpak-juri-techcomfest-2027`
+> `https://[URL-VERCEL-TIM].vercel.app/?jury_token=ganti-token-rahasia-panel-juri-minimal-24-karakter`
 
 ## Struktur Pembagian Kerja Tim
 - **Arya (Backend):** `prisma/`, `src/services/`, `api/`

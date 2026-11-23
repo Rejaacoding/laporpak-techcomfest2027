@@ -18,21 +18,21 @@ Supaya tidak ada kerjaan yang bertumpuk di file yang sama (*zero merge-conflict*
 
 ## 2. Checklist Tugas Lengkap per Anggota
 
-### A. Tugas Lengkap ARYA (Backend — Database, Mesin 10 Status & Skor)
+### A. Tugas Lengkap ARYA (Backend — Database, Mesin 10 Status & Skor) — ✅ SELESAI 100%
 
-- [ ] **`US-001` — Gudang Data Prisma, PostGIS & 25–30 Data Contoh (`seed.ts`):**
+- [x] **`US-001` — Gudang Data Prisma, PostGIS & 25–30 Data Contoh (`seed.ts`):**
   - Buat 5 tabel utama (`Department`, `User`, `Ticket`, `TicketValidation`, `AuditLog`) + tabel dukungan (`TicketSupport`), `10` status, dan `8` kategori sesuai Lampiran A PRD.
   - Pisahkan titik GPS asli (`location` khusus hitung jarak meter di server) dengan titik publik yang dibulatkan (`publicLat`/`publicLng` `~11 m`) agar lokasi rumah pelapor aman.
   - Isi `seed.ts`: 4 dinas (`Dishub`, `Dinas PU Bina Marga`, `DLH`, `Satpol PP`) dengan modal skor awal **`80`**, serta `25–30` laporan contoh di Surabaya–Sidoarjo (pastikan akun demo *Warga Pelapor* hanya memegang maksimal `2` laporan aktif agar juri selalu bisa mencoba buat laporan baru).
-- [ ] **`US-005` — Cek Titik Penuh Pra-Kamera, Simpan Laporan Baru & Dukung Prioritas:**
+- [x] **`US-005` — Cek Titik Penuh Pra-Kamera, Simpan Laporan Baru & Dukung Prioritas:**
   - `GET /api/tickets/check-radius`: cek batas wilayah Surabaya–Sidoarjo + kuota `3` laporan kategori sama (`50 m`) & `6` laporan global (`30 m`), sekaligus kembalikan daftar `nearbyTickets` supaya warga bisa langsung menekan *Dukung Prioritas* sebelum membuka kamera.
   - `POST /api/tickets`: simpan laporan secara aman; jika sinyal warga putus dan mereka menekan *Kirim Ulang* (`Idempotency-Key` sama), kembalikan hasil sebelumnya tanpa membuat laporan ganda.
   - `POST /api/tickets/:id/support`: tiap kelipatan `10` dukungan warga lain, potong sisa waktu tenggat dinas `15%` lebih cepat (batas minimal `6 jam`) dan naikkan hukuman terlambat menjadi `-6 poin`.
-- [ ] **`US-006` — 8 Aksi Meja Kerja Dinas (`/api/dinas/*` & `/api/tickets/:id/*`):**
+- [x] **`US-006` — 8 Aksi Meja Kerja Dinas (`/api/dinas/*` & `/api/tickets/:id/*`):**
   - *Mulai Kerjakan* (`process`), *Oper Tiket* (`transfer` — maks 1 kali di `12 jam`/`24 jam` pertama sejak laporan masuk + wajib alasan), *Di Luar Wewenang* (`out-of-scope` — pilih `PLN/PDAM/BPJN/BBWS/Telkom/Lainnya` + catatan), dan *Tolak Spam* (`reject-spam` — hilang dari peta, foto non-NSFW dikarantina 7 hari, pelapor `-0.5` dengan batas bawah `0.1` pada pelanggaran pertama akun baru).
   - *Laporkan Selesai* (`resolve` — wajib foto langsung `<= 75 m`, jeda waktu SLA ke `remainingSlaMs`, dan hitung jarak meter petugas `repairDistanceMeters` untuk ditampilkan di slider foto warga).
   - *Sengketa & Eskalasi:* *Kerjakan Ulang* (`reprocess-disputed`), *Ajukan Banding 1 Kali* (`counter-dispute`), dan *Selesai Eskalasi* (`resolve-escalated` dengan Berita Acara `<= 5 MB` + foto lapangan `<= 75 m`).
-- [ ] **`US-007`, `US-004` & `US-003` — Suara Warga, Wasit Waktu Otomatis & Segel Anti-Edit:**
+- [x] **`US-007`, `US-004` & `US-003` — Suara Warga, Wasit Waktu Otomatis & Segel Anti-Edit:**
   - `POST /api/tickets/:id/validate`: kunci baris database sesaat (`SELECT FOR UPDATE`) agar aman saat 2 warga menekan tombol bersamaan; laporan tuntas (`CLOSED`) jika disetujui minimal `2` warga berbeda dengan total bobot `>= 2.0` (atau Pelapor Utama di hari ke-3 `48–72 jam` bila belum ada bantahan).
   - *Wasit Waktu Otomatis (`Lazy Evaluation`):* saat laporan dibuka/diubah, cek apakah sudah lewat tenggat (`OVERDUE`, potong `-3`/`-6` maks 1 kali), apakah sengketa didiamkan `> 24 jam` (paksa kerjakan ulang), atau apakah uji publik lewat `72 jam` tanpa respons (`AUTO_CLOSED` dengan bonus dinas `0`).
   - `GET /api/tickets/:id/audit-verify`: cek keutuhan rantai segel digital `HMAC-SHA256` dan kirim kalimat ringkasan bahasa awam (`summaryText`).
@@ -63,7 +63,7 @@ Supaya tidak ada kerjaan yang bertumpuk di file yang sama (*zero merge-conflict*
 
 ### C. Tugas Lengkap REZA (Fullstack, NetOps, Kamera WebRTC, Panel Juri & Demo)
 
-- [ ] **`US-002` & `US-004` — Server Cloud, Login 1 Pintu, Nama Samaran & Cache Cepat Redis:**
+- [x] **`US-002` & `US-004` — Server Cloud, Login 1 Pintu, Nama Samaran & Cache Cepat Redis (Backend & Cloud Infra Selesai):**
   - Siapkan project **Supabase** (PostGIS, Auth Email + Google OAuth, Storage bucket publik & privat), **Upstash Redis**, dan deployment **Vercel** region `sin1` (pastikan link publik tidak terkunci *Vercel Authentication*).
   - Buat penjaga autentikasi (`GET /api/auth/me` + pembuat nama samaran otomatis `Warga-Delta-402` saat warga baru masuk) serta pengunci `departmentId` agar petugas dinas hanya bisa mengakses dinasnya sendiri.
   - Pasang penyimpanan cepat Redis (`45 detik` peta, `180 detik` rapor) yang otomatis dihapus (`DEL`) setiap ada perubahan data, ditambah kupon foto sekali pakai (`POST /api/capture-nonce`) dan pencegah lompat lokasi mustahil (`> 120 km/jam`).

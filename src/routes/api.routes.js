@@ -1,9 +1,11 @@
 import express from "express";
 import {
+  aktivasiMitraController,
   authMeController,
   captureNonceController,
   checkRadiusController,
   createTicketController,
+  cronSlaController,
   getMediaSignedUrlController,
   getTicketDetailController,
   healthController,
@@ -41,13 +43,9 @@ router.post("/jury/session", enforceJurySessionBruteForceGuard, jurySessionContr
 router.post("/jury/tickets/:id/simulate-time", requireJuryToken, enforceJuryMutationRateLimit, jurySimulateTimeController);
 router.post("/jury/reset", requireJuryToken, enforceJuryMutationRateLimit, juryResetController);
 
-// Blokir akses sesi juri ke endpoint aktivasi mitra (Bonus Minggu 4)
-router.all("/aktivasi-mitra", blockJuryPartnerActivation, (_req, res) => {
-  res.status(501).json({
-    ok: false,
-    error: { code: "NOT_IMPLEMENTED", message: "Aktivasi mitra baru masuk tahap Bonus Minggu 4.", retryable: false },
-  });
-});
+// Aktivasi kerja sama mitra baru (kode sekali pakai, diblokir 403 untuk sesi juri #23) & Vercel Cron harian
+router.post("/aktivasi-mitra", blockJuryPartnerActivation, enforceJurySessionBruteForceGuard, aktivasiMitraController);
+router.get("/cron/sla", cronSlaController);
 
 // 2. Akses Publik: Peta, Cek Radius Pra-Kamera, Detail, Signed URL, Audit & Rapor (6 endpoint)
 router.get("/tickets", listTicketsController);

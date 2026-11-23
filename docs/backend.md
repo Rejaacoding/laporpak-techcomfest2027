@@ -519,7 +519,7 @@ UPSTASH_REDIS_REST_TOKEN="..."
 # 4. Kriptografi Server, CORS & Mode Simulasi Juri
 SERVER_SECRET="64-char-hex-secret-untuk-rantai-hash-auditlog-dan-nonce"
 AUDIT_SALT="64-char-hex-salt-untuk-actorPublicRef-anonim"
-JURY_SECRET_TOKEN="laporpak-juri-techcomfest-2027"
+JURY_SECRET_TOKEN="ganti-token-rahasia-panel-juri-minimal-24-karakter"
 ALLOWED_ORIGINS="https://laporpak-techcomfest2027.vercel.app"
 ```
 

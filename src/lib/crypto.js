@@ -18,7 +18,11 @@ export function requireSecret(envNames, devFallback) {
 }
 
 export function getJurySecret() {
-  return requireSecret("JURY_SECRET_TOKEN", "laporpak-juri-techcomfest-2027");
+  const val = process.env.JURY_SECRET_TOKEN?.trim();
+  if (!val || val.length < 16) {
+    throw new Error("Missing required secret env: JURY_SECRET_TOKEN");
+  }
+  return val;
 }
 
 export function safeEqual(a, b) {
@@ -88,7 +92,7 @@ export function signJurySession(roleKey = "WARGA_PELAPOR") {
   const sessionToken = signToken(
     { sid, roleKey, jury: true, exp },
     "JURY_SECRET_TOKEN",
-    "laporpak-juri-techcomfest-2027"
+    "dev_jury_session_secret_fallback_0001"
   );
   return {
     sessionToken,
@@ -99,7 +103,7 @@ export function signJurySession(roleKey = "WARGA_PELAPOR") {
 }
 
 export function verifyJurySession(token) {
-  const parsed = verifyToken(token, "JURY_SECRET_TOKEN", "laporpak-juri-techcomfest-2027");
+  const parsed = verifyToken(token, "JURY_SECRET_TOKEN", "dev_jury_session_secret_fallback_0001");
   return parsed?.jury ? parsed : null;
 }
 

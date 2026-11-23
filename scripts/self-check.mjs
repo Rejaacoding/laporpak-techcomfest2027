@@ -716,9 +716,55 @@ async function runTests() {
   }
   assert.equal(rateLimited, true, "Brute-force guard must trigger 429 on /api/jury/session after 10 attempts");
   await redis.deleteByPrefix("rl:ip:jury_session:");
-  console.log("PASS [15/15] RLS Lockdown (6 Tables), CORS Allowlist, Vercel Dev-Auth Block & Brute-Force Guard");
+  console.log("PASS [15/16] RLS Lockdown (6 Tables), CORS Allowlist, Vercel Dev-Auth Block & Brute-Force Guard");
 
-  console.log("\nALL 15 END-TO-END BACKEND & SECURITY SUITES PASSED (ZERO ERRORS).");
+  // 16. Sample Assets (#32), Single-Use /api/aktivasi-mitra (US-002) & /api/cron/sla (US-004)
+  const fs = await import("node:fs");
+  const pathMod = await import("node:path");
+  const { validateFieldPhotoBuffer, validateBeritaAcaraBuffer } = await import("../src/services/media.service.js");
+  const samplesDir = pathMod.resolve(process.cwd(), "public/samples");
+  const sampleFiles = fs.readdirSync(samplesDir).filter((f) => f.endsWith(".webp"));
+  assert.equal(sampleFiles.length, 16, "Must have 16 calibrated .webp sample photos in public/samples/");
+  for (const file of sampleFiles) {
+    const b64 = fs.readFileSync(pathMod.join(samplesDir, file)).toString("base64");
+    const meta = validateFieldPhotoBuffer(b64);
+    assert.equal(meta.dims.width, 640);
+    assert.equal(meta.dims.height, 360);
+  }
+  const samplePdfB64 = fs.readFileSync(pathMod.join(samplesDir, "berita-acara-sample.pdf")).toString("base64");
+  const pdfMeta = validateBeritaAcaraBuffer(samplePdfB64);
+  assert.equal(pdfMeta.contentType, "application/pdf");
+
+  await redis.del("mitra:used:MITRA-PU-2027");
+  const mitra1 = await req("POST", "/api/aktivasi-mitra", {
+    body: {
+      email: "mitra.baru.pu@laporpak.id",
+      displayName: "Budi Santoso (Dinas PU)",
+      activationCode: "MITRA-PU-2027",
+    },
+  });
+  assert.equal(mitra1.status, 201);
+  assert.equal(mitra1.json.data.role, "ADMIN_DINAS");
+  assert.equal(mitra1.json.data.departmentId, "DPU");
+  assert.equal(mitra1.json.data.isVerifiedPartner, true);
+
+  const mitra2 = await req("POST", "/api/aktivasi-mitra", {
+    body: {
+      email: "mitra.duplikat.pu@laporpak.id",
+      activationCode: "MITRA-PU-2027",
+    },
+  });
+  assert.equal(mitra2.status, 409);
+  assert.equal(mitra2.json.error.code, "VERSION_CONFLICT");
+  await prisma.user.deleteMany({ where: { email: "mitra.baru.pu@laporpak.id" } });
+  await redis.del("mitra:used:MITRA-PU-2027");
+
+  const cronRes = await req("GET", "/api/cron/sla");
+  assert.equal(cronRes.status, 200);
+  assert.ok(cronRes.json.data.evaluatedAt);
+  console.log("PASS [16/16] 16 Calibrated Sample Photos (#32), Single-Use /api/aktivasi-mitra (US-002) & /api/cron/sla (US-004)");
+
+  console.log("\nALL 16 END-TO-END BACKEND & SECURITY SUITES PASSED (ZERO ERRORS).");
 }
 
 runTests()

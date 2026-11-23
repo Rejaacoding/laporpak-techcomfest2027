@@ -110,3 +110,9 @@ export const mediaSignedUrlQuerySchema = z.object({
 export const raporQuerySchema = z.object({
   category: z.enum(CATEGORY_CODES).optional(),
 });
+
+export const aktivasiMitraBodySchema = z.object({
+  email: z.string().trim().email("Format email instansi tidak valid"),
+  activationCode: z.string().trim().min(8, "Kode aktivasi tidak valid").max(40),
+  aliasName: z.string().trim().min(3).max(50).optional(),
+});

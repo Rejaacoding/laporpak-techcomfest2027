@@ -1,4 +1,5 @@
 import {
+  aktivasiMitraBodySchema,
   captureNonceBodySchema,
   checkRadiusQuerySchema,
   createTicketBodySchema,
@@ -15,9 +16,12 @@ import {
   transferTicketBodySchema,
   validateTicketBodySchema,
 } from "../shared/schemas.js";
+import crypto from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { redis } from "../lib/redis.js";
 import { AppError, okResponse } from "../lib/errors.js";
+import { evaluateActiveTicketsBatch } from "../services/lazy-eval.service.js";
+import { cleanupStorageKeys, getSignedNsfwMediaUrl } from "../services/media.service.js";
 import {
   checkRadiusPreCamera,
   createTicket,
@@ -29,7 +33,6 @@ import {
 } from "../services/ticket.service.js";
 import { validateTicket } from "../services/validation.service.js";
 import { executeDinasAction, listDinasTickets } from "../services/dinas.service.js";
-import { getSignedNsfwMediaUrl } from "../services/media.service.js";
 import { getRaporData } from "../services/rapor.service.js";
 import {
   createJurySession,
@@ -273,4 +276,97 @@ export function makeDinasActionController(action) {
       return next(err);
     }
   };
+}
+
+const PARTNER_INVITE_CODES = {
+  "MITRA-DISHUB-2027": "DISHUB",
+  "MITRA-PU-2027": "DPU",
+  "MITRA-DPU-2027": "DPU",
+  "MITRA-DLH-2027": "DLH",
+  "MITRA-SATPOLPP-2027": "SATPOLPP",
+};
+
+export async function aktivasiMitraController(req, res, next) {
+  try {
+    const body = aktivasiMitraBodySchema.parse(req.body || {});
+    const code = body.activationCode.toUpperCase();
+    const departmentId = PARTNER_INVITE_CODES[code];
+    if (!departmentId) {
+      throw new AppError(401, "UNAUTHORIZED", "Kode aktivasi mitra tidak sah atau tidak dikenali.");
+    }
+
+    const codeKey = `mitra:used:${code}`;
+    const firstUse = await redis.setNx(codeKey, body.email, 365 * 24 * 3600);
+    if (!firstUse) {
+      throw new AppError(409, "VERSION_CONFLICT", "Kode aktivasi mitra sekali pakai ini sudah pernah digunakan.");
+    }
+
+    const aliasName = body.aliasName || `Mitra-${departmentId}-${crypto.randomInt(100, 999)}`;
+    const user = await prisma.user.upsert({
+      where: { email: body.email.toLowerCase() },
+      create: {
+        id: req.user?.id || `mitra_${crypto.randomBytes(8).toString("hex")}`,
+        email: body.email.toLowerCase(),
+        aliasName,
+        role: "ADMIN_DINAS",
+        departmentId,
+        isVerifiedPartner: true,
+        isDemoData: false,
+        trustScore: 1.0,
+      },
+      update: {
+        role: "ADMIN_DINAS",
+        departmentId,
+        isVerifiedPartner: true,
+      },
+    });
+
+    return okResponse(
+      res,
+      {
+        aliasName: user.aliasName,
+        role: user.role,
+        departmentId: user.departmentId,
+        isVerifiedPartner: user.isVerifiedPartner,
+      },
+      `Akun mitra resmi ${departmentId} berhasil diaktifkan. Kode aktivasi telah dihanguskan.`,
+      201
+    );
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function cronSlaController(_req, res, next) {
+  try {
+    await evaluateActiveTicketsBatch();
+
+    const expiredQuarantine = await prisma.ticket.findMany({
+      where: {
+        status: "REJECTED_SPAM",
+        quarantineDeleteAt: { lte: new Date() },
+      },
+      select: { id: true, beforePhotoKey: true },
+      take: 50,
+    });
+
+    if (expiredQuarantine.length > 0) {
+      await cleanupStorageKeys(expiredQuarantine.map((t) => t.beforePhotoKey));
+      await prisma.ticket.updateMany({
+        where: { id: { in: expiredQuarantine.map((t) => t.id) } },
+        data: { quarantineDeleteAt: null, beforePhotoKey: "" },
+      });
+    }
+
+    return okResponse(
+      res,
+      {
+        evaluatedAt: new Date().toISOString(),
+        quarantinePurgedCount: expiredQuarantine.length,
+      },
+      "Evaluasi SLA terjadwal & pembersihan karantina 7 hari selesai."
+    );
+  } catch (err) {
+    return next(err);
+  }
 }
