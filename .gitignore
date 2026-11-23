@@ -6,10 +6,13 @@
 
 # Dependencies & Build Output
 node_modules/
+frontend/node_modules/
+frontend/dist/
 dist/
 build/
 .vercel/
 .next/
+.local-media/
 
 # Logs & OS Files
 *.log

@@ -1,0 +1,245 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+  binaryTargets   = ["debian-openssl-3.0.x", "rhel-openssl-3.0.x", "windows"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [postgis]
+}
+
+enum Role {
+  WARGA
+  ADMIN_DINAS
+}
+
+enum ActorRole {
+  WARGA
+  ADMIN_DINAS
+  SYSTEM
+}
+
+enum TicketCategory {
+  JALAN_AMBLES
+  KABEL_MENJUNTAI
+  POHON_TUMBANG
+  PJU_MATI
+  SAMPAH_LIAR
+  SALURAN_TERSUMBAT
+  REKLAME_LIAR
+  JALAN_BERLUBANG
+}
+
+enum TicketStatus {
+  OPEN
+  OUT_OF_SCOPE
+  REJECTED_SPAM
+  IN_PROGRESS
+  OVERDUE
+  PENDING_VALIDATION
+  DISPUTED
+  ESCALATED
+  CLOSED
+  AUTO_CLOSED
+}
+
+enum OutOfScopeAgency {
+  PLN
+  PDAM
+  BPJN_NASIONAL
+  BBWS
+  TELKOM_FIBER
+  LAINNYA
+}
+
+enum ValidationType {
+  CONFIRM_RESOLVED
+  DISPUTE_FALSE
+}
+
+model Department {
+  id                String   @id
+  code              String   @unique
+  name              String
+  shortName         String
+  jurisdiction      String
+  integrityScore    Float    @default(80.0)
+  totalResolved     Int      @default(0)
+  onTimeResolved    Int      @default(0)
+  overdueCount      Int      @default(0)
+  chronicOverdueCnt Int      @default(0)
+  escalatedCount    Int      @default(0)
+  outOfScopeCount   Int      @default(0)
+  rejectedSpamCount Int      @default(0)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  users   User[]
+  tickets Ticket[]
+}
+
+model User {
+  id                String    @id
+  email             String    @unique
+  aliasName         String    @unique
+  role              Role      @default(WARGA)
+  departmentId      String?
+  isVerifiedPartner Boolean   @default(false)
+  isDemoData        Boolean   @default(false)
+
+  trustScore        Float     @default(0.5)
+  hasGraduatedToOne Boolean   @default(false)
+  violationCount    Int       @default(0)
+  violationWindow   Json      @default("[]")
+  cooldownUntil     DateTime? @db.Timestamptz(3)
+  frozenUntil       DateTime? @db.Timestamptz(3)
+
+  lastGpsLat        Float?
+  lastGpsLng        Float?
+  lastGpsAccuracy   Float?
+  lastGpsAt         DateTime? @db.Timestamptz(3)
+
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
+
+  department  Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  tickets     Ticket[]           @relation("ReporterTickets")
+  supports    TicketSupport[]
+  validations TicketValidation[]
+
+  @@index([role, departmentId])
+  @@index([isDemoData])
+}
+
+model Ticket {
+  id                   String            @id @default(cuid())
+  code                 String            @unique
+  title                String
+  description          String
+  category             TicketCategory
+  status               TicketStatus      @default(OPEN)
+  departmentId         String
+  reporterId           String
+  isDemoData           Boolean           @default(false)
+
+  publicLat            Float
+  publicLng            Float
+  gpsAccuracyMeters    Float
+  location             Unsupported("geography(Point, 4326)")
+
+  beforePhotoUrl       String
+  beforePhotoKey       String
+  afterPhotoUrl        String?
+  afterPhotoKey        String?
+  repairCapturedAt     DateTime?         @db.Timestamptz(3)
+  repairDistanceMeters Int?
+  beritaAcaraUrl       String?
+  beritaAcaraKey       String?
+  isNsfwPendingReview  Boolean           @default(false)
+  isLowQualityOverride Boolean           @default(false)
+
+  syncedAt             DateTime          @default(now()) @db.Timestamptz(3)
+  slaInitialHours      Int
+  slaDeadline          DateTime          @db.Timestamptz(3)
+  remainingSlaMs       Int?
+  validationStartedAt  DateTime?         @db.Timestamptz(3)
+  disputedAt           DateTime?         @db.Timestamptz(3)
+
+  validationRound      Int               @default(1)
+  disputeCount         Int               @default(0)
+  isAppealRound        Boolean           @default(false)
+  appealUsed           Boolean           @default(false)
+  transferCount        Int               @default(0)
+  transferredFromId    String?
+  transferReason       String?
+
+  overduePenalized     Boolean           @default(false)
+  overdueHighPenalty   Boolean           @default(false)
+  isChronicOverdue     Boolean           @default(false)
+  everOverdue          Boolean           @default(false)
+  everDisputed         Boolean           @default(false)
+  everEscalated        Boolean           @default(false)
+
+  outOfScopeAgency     OutOfScopeAgency?
+  outOfScopeReason     String?
+  rejectedSpamReason   String?
+  quarantineDeleteAt   DateTime?         @db.Timestamptz(3)
+  supportCount         Int               @default(0)
+  supportCutTier       Int               @default(0)
+  closedResolutionNote String?
+
+  idempotencyKey       String?           @unique
+  version              Int               @default(1)
+  createdAt            DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime          @updatedAt @db.Timestamptz(3)
+
+  department  Department         @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  reporter    User               @relation("ReporterTickets", fields: [reporterId], references: [id], onDelete: Restrict)
+  supports    TicketSupport[]
+  validations TicketValidation[]
+  auditLogs   AuditLog[]
+
+  @@index([status, departmentId, slaDeadline])
+  @@index([category, status])
+  @@index([reporterId, status])
+  @@index([isDemoData, status])
+}
+
+model TicketSupport {
+  id        String   @id @default(cuid())
+  ticketId  String
+  userId    String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@index([userId])
+}
+
+model TicketValidation {
+  id                String         @id @default(cuid())
+  ticketId          String
+  validatorId       String
+  validationRound   Int
+  type              ValidationType
+  weightAtVote      Float
+  deviceFingerprint String
+  evidencePhotoUrl  String?
+  evidencePhotoKey  String?
+  gpsAccuracyMeters Float
+  distanceMeters    Int
+  isPenalized       Boolean        @default(false)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  validator User   @relation(fields: [validatorId], references: [id], onDelete: Restrict)
+
+  @@unique([ticketId, validatorId, validationRound])
+  @@unique([ticketId, deviceFingerprint, validationRound])
+  @@index([ticketId, validationRound, type])
+}
+
+model AuditLog {
+  id                String        @id @default(cuid())
+  ticketId          String
+  actorPublicRef    String
+  actorRole         ActorRole
+  actorDisplayLabel String
+  action            String
+  fromStatus        TicketStatus?
+  toStatus          TicketStatus
+  note              String?
+  timestampMs       BigInt
+  prevHash          String
+  currentHash       String
+  createdAt         DateTime      @default(now()) @db.Timestamptz(3)
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}
