@@ -17,6 +17,7 @@ import { CitizenOnly, RequireAuth } from "./components/auth/index.ts";
 import { Button, ToastProvider } from "./components/ui/index.js";
 import LoginPage from "./pages/LoginPage.tsx";
 import LaporPage from "./pages/LaporPage.tsx";
+import JuryPanel from "./features/jury/JuryPanel.jsx";
 
 function RouteThemeSync() {
   const { pathname } = useLocation();
@@ -149,6 +150,7 @@ export default function App() {
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            <JuryPanel />
           </AuthProvider>
         </ToastProvider>
       </ThemeProvider>

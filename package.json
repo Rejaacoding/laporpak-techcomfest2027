@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch api/index.js",
     "start": "node api/index.js",
-    "build": "npx prisma generate && (test -f frontend/package.json && npm --prefix frontend install --include=dev && npm --prefix frontend run build || true)",
+    "build": "npx prisma generate && npm --prefix frontend install --include=dev && npm --prefix frontend run build && node -e \"const fs=require('fs'); for (const d of ['samples','geo','mascots']) { if (fs.existsSync('public/'+d)) fs.cpSync('public/'+d, 'frontend/dist/'+d, { recursive: true }); }\"",
     "build:client": "npm --prefix frontend run build",
     "db:generate": "npx prisma generate",
     "db:migrate": "npx prisma migrate deploy",

@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +15,7 @@ import apiRoutes from "../src/routes/api.routes.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
+const frontendDistPath = path.join(rootDir, "frontend", "dist");
 const publicPath = path.join(rootDir, "public");
 
 function buildAllowedOrigins() {
@@ -53,6 +55,9 @@ if (process.env.NODE_ENV !== "test") {
   app.use(morgan("dev"));
 }
 
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+}
 app.use(express.static(publicPath));
 if (process.env.NODE_ENV !== "production" && !hasSupabaseConfig()) {
   app.use("/local-media", express.static(path.join(rootDir, ".local-media")));
@@ -72,7 +77,8 @@ app.use("/api/*", (_req, res) => {
 });
 
 app.get("*", (_req, res) => {
-  res.sendFile(path.join(publicPath, "index.html"));
+  const spaIndex = path.join(frontendDistPath, "index.html");
+  res.sendFile(fs.existsSync(spaIndex) ? spaIndex : path.join(publicPath, "index.html"));
 });
 
 app.use(errorHandler);

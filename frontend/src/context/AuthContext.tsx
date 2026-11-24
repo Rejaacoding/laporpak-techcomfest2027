@@ -61,9 +61,9 @@ async function fetchMe(token: string): Promise<AuthUserProfile> {
 
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
-    const err = new Error(payload?.message || "");
+    const err = new Error(payload?.error?.message || payload?.message || "");
     (err as Error & { status?: number; code?: string }).status = res.status;
-    (err as Error & { code?: string }).code = payload?.code;
+    (err as Error & { code?: string }).code = payload?.error?.code || payload?.code;
     throw err;
   }
 
