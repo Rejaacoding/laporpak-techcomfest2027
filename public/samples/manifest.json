@@ -1,0 +1,145 @@
+{
+  "calibrationTarget": {
+    "luminanceMin": 50,
+    "luminanceMax": 220,
+    "minLaplacianSharpness": 80
+  },
+  "samples": [
+    {
+      "id": "jalan-ambles-before",
+      "label": "Jalan Ambles Parah (Sebelum)",
+      "file": "/samples/jalan_ambles.webp",
+      "categoryCode": "JALAN_AMBLES",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "jalan-ambles-fixed",
+      "label": "Jalan Ambles Parah (Sesudah)",
+      "file": "/samples/jalan_ambles-fixed.webp",
+      "categoryCode": "JALAN_AMBLES",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "kabel-menjuntai-before",
+      "label": "Kabel / Tiang Bahaya (Sebelum)",
+      "file": "/samples/kabel_menjuntai.webp",
+      "categoryCode": "KABEL_MENJUNTAI",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "kabel-menjuntai-fixed",
+      "label": "Kabel / Tiang Bahaya (Sesudah)",
+      "file": "/samples/kabel_menjuntai-fixed.webp",
+      "categoryCode": "KABEL_MENJUNTAI",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "pohon-tumbang-before",
+      "label": "Pohon Tumbang / Halang Jalan (Sebelum)",
+      "file": "/samples/pohon_tumbang.webp",
+      "categoryCode": "POHON_TUMBANG",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "pohon-tumbang-fixed",
+      "label": "Pohon Tumbang / Halang Jalan (Sesudah)",
+      "file": "/samples/pohon_tumbang-fixed.webp",
+      "categoryCode": "POHON_TUMBANG",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "pju-mati-before",
+      "label": "Lampu PJU Mati (Sebelum)",
+      "file": "/samples/pju_mati.webp",
+      "categoryCode": "PJU_MATI",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "pju-mati-fixed",
+      "label": "Lampu PJU Mati (Sesudah)",
+      "file": "/samples/pju_mati-fixed.webp",
+      "categoryCode": "PJU_MATI",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "sampah-liar-before",
+      "label": "Tumpukan Sampah Liar (Sebelum)",
+      "file": "/samples/sampah_liar.webp",
+      "categoryCode": "SAMPAH_LIAR",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "sampah-liar-fixed",
+      "label": "Tumpukan Sampah Liar (Sesudah)",
+      "file": "/samples/sampah_liar-fixed.webp",
+      "categoryCode": "SAMPAH_LIAR",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "saluran-tersumbat-before",
+      "label": "Saluran Air / Drainase Tersumbat (Sebelum)",
+      "file": "/samples/saluran_tersumbat.webp",
+      "categoryCode": "SALURAN_TERSUMBAT",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "saluran-tersumbat-fixed",
+      "label": "Saluran Air / Drainase Tersumbat (Sesudah)",
+      "file": "/samples/saluran_tersumbat-fixed.webp",
+      "categoryCode": "SALURAN_TERSUMBAT",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "reklame-liar-before",
+      "label": "Reklame / Bangunan Liar Bahaya (Sebelum)",
+      "file": "/samples/reklame_liar.webp",
+      "categoryCode": "REKLAME_LIAR",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "reklame-liar-fixed",
+      "label": "Reklame / Bangunan Liar Bahaya (Sesudah)",
+      "file": "/samples/reklame_liar-fixed.webp",
+      "categoryCode": "REKLAME_LIAR",
+      "stage": "AFTER",
+      "isDemoData": true
+    },
+    {
+      "id": "jalan-berlubang-before",
+      "label": "Jalan / Aspal Berlubang (Sebelum)",
+      "file": "/samples/jalan_berlubang.webp",
+      "categoryCode": "JALAN_BERLUBANG",
+      "stage": "BEFORE",
+      "isDemoData": true
+    },
+    {
+      "id": "jalan-berlubang-fixed",
+      "label": "Jalan / Aspal Berlubang (Sesudah)",
+      "file": "/samples/jalan_berlubang-fixed.webp",
+      "categoryCode": "JALAN_BERLUBANG",
+      "stage": "AFTER",
+      "isDemoData": true
+    }
+  ],
+  "documents": [
+    {
+      "id": "berita-acara-sample",
+      "label": "Contoh Berita Acara Penyelesaian Eskalasi",
+      "file": "/samples/berita-acara-sample.pdf",
+      "isDemoData": true
+    }
+  ]
+}
