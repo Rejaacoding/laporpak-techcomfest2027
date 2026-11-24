@@ -5,6 +5,7 @@ import {
   resetDemoDatabase,
   fetchSampleManifest,
 } from './jury-api.js';
+import { dispatchJuryEvent, JURY_ROLE_KEY, JURY_TOKEN_KEY } from '../../lib/api.js';
 
 const PRESET_LOCATIONS = [
   { label: 'Alun-Alun Sidoarjo', lat: -7.4461, lng: 112.7181 },
@@ -19,9 +20,20 @@ export default function JuryPanel({
   onDemoReset,
 }) {
   const [isOpen, setIsOpen] = useState(true);
-  const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('laporpak_jury_token') || '');
-  const [availableRoles, setAvailableRoles] = useState(['WARGA_PELAPOR']);
-  const [activeRole, setActiveRole] = useState('WARGA_PELAPOR');
+  const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem(JURY_TOKEN_KEY) || '');
+  const [availableRoles, setAvailableRoles] = useState([
+    'WARGA_PELAPOR',
+    'WARGA_VALIDATOR',
+    'WARGA_VALIDATOR_2',
+    'WARGA_BARU',
+    'ADMIN_DISHUB',
+    'ADMIN_DPU',
+    'ADMIN_DLH',
+    'ADMIN_SATPOLPP',
+  ]);
+  const [activeRole, setActiveRole] = useState(
+    () => sessionStorage.getItem(JURY_ROLE_KEY) || 'WARGA_PELAPOR'
+  );
 
   const [lat, setLat] = useState(-7.4461);
   const [lng, setLng] = useState(112.7181);
@@ -45,10 +57,15 @@ export default function JuryPanel({
           setErrorMsg('');
           const session = await initJurySession(urlToken);
           const token = session.token || session.sessionToken || urlToken;
-          sessionStorage.setItem('laporpak_jury_token', token);
+          const initialRole = sessionStorage.getItem(JURY_ROLE_KEY) || 'WARGA_PELAPOR';
+          sessionStorage.setItem(JURY_TOKEN_KEY, token);
+          sessionStorage.setItem(JURY_ROLE_KEY, initialRole);
           setSessionToken(token);
           if (Array.isArray(session.availableRoles) && session.availableRoles.length > 0) {
             setAvailableRoles(session.availableRoles);
+          }
+          if (onRoleChange) {
+            await Promise.resolve(onRoleChange(initialRole, token)).catch(() => {});
           }
           setStatusMsg('Mode Simulasi Juri aktif.');
         } catch (err) {
@@ -75,10 +92,16 @@ export default function JuryPanel({
 
   if (!sessionToken) return null;
 
-  function handleRoleSwitch(nextRole) {
+  async function handleRoleSwitch(nextRole) {
     setActiveRole(nextRole);
-    setStatusMsg(`Peran aktif diubah ke: ${nextRole}`);
-    if (onRoleChange) onRoleChange(nextRole, sessionToken);
+    sessionStorage.setItem(JURY_ROLE_KEY, nextRole);
+    setErrorMsg('');
+    try {
+      if (onRoleChange) await Promise.resolve(onRoleChange(nextRole, sessionToken));
+      setStatusMsg(`Peran aktif diubah ke: ${nextRole}`);
+    } catch (err) {
+      setErrorMsg(err?.message || 'Gagal mengganti peran simulasi.');
+    }
   }
 
   function handleApplyGps(nextLat = lat, nextLng = lng) {
@@ -91,6 +114,7 @@ export default function JuryPanel({
     setLat(coords.lat);
     setLng(coords.lng);
     setStatusMsg(`GPS simulasi disetel: ${coords.lat}, ${coords.lng}`);
+    dispatchJuryEvent('gps', coords);
     if (onSimulatedGpsChange) onSimulatedGpsChange(coords);
   }
 
@@ -99,16 +123,18 @@ export default function JuryPanel({
       setErrorMsg('Pilih foto sampel terlebih dahulu.');
       return;
     }
+    const detail = {
+      samplePath: selectedSample,
+      isDemoData: true,
+      lat: Number(lat),
+      lng: Number(lng),
+      sessionToken,
+    };
     setErrorMsg('');
     setStatusMsg(`Simulasi jepret memakai: ${selectedSample}`);
+    dispatchJuryEvent('capture', detail);
     if (onSimulatedCapture) {
-      onSimulatedCapture({
-        samplePath: selectedSample,
-        isDemoData: true,
-        lat: Number(lat),
-        lng: Number(lng),
-        sessionToken,
-      });
+      onSimulatedCapture(detail);
     }
   }
 
@@ -142,6 +168,7 @@ export default function JuryPanel({
       setErrorMsg('');
       await resetDemoDatabase(sessionToken);
       setStatusMsg('Data demo berhasil di-reset ke kondisi awal.');
+      dispatchJuryEvent('reset', {});
       if (onDemoReset) onDemoReset();
     } catch (err) {
       setErrorMsg(err.message);
@@ -241,7 +268,7 @@ export default function JuryPanel({
               className="w-full rounded border border-neutral-300 px-2 py-1.5 bg-white mb-1.5"
             >
               {samples.length === 0 ? (
-                <option value="/samples/sample-jalan-rusak.webp">Default Sample</option>
+                <option value="/samples/jalan_berlubang.webp">Jalan Berlubang (Sampel)</option>
               ) : (
                 samples.map((s) => (
                   <option key={s.id || s.file} value={s.file || s.path}>

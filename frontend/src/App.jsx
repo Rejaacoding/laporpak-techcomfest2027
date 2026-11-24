@@ -99,6 +99,11 @@ function PageShell({ title, subtitle }) {
   );
 }
 
+function JuryPanelBridge() {
+  const { switchJuryRole } = useAuth();
+  return <JuryPanel onRoleChange={switchJuryRole} />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -150,7 +155,7 @@ export default function App() {
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-            <JuryPanel />
+            <JuryPanelBridge />
           </AuthProvider>
         </ToastProvider>
       </ThemeProvider>

@@ -15,6 +15,11 @@ import { useAuth } from "../context/AuthContext.tsx";
 import { CATEGORIES, SLA_TIERS } from "../constants/designTokens.js";
 import { humanizeError } from "../lib/humanize.js";
 import {
+  fetchSampleAsBase64,
+  getJuryHeaders,
+  onJuryEvent,
+} from "../lib/api.js";
+import {
   Button,
   Card,
   CardContent,
@@ -126,7 +131,9 @@ export default function LaporPage() {
           lng: String(lng),
           category,
         });
-        const res = await fetch(`/api/tickets/check-radius?${params.toString()}`);
+        const res = await fetch(`/api/tickets/check-radius?${params.toString()}`, {
+          headers: getJuryHeaders(),
+        });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(humanizeError({ status: res.status, data: payload }));
@@ -144,6 +151,49 @@ export default function LaporPage() {
   useEffect(() => {
     checkRadius(draft.lat, draft.lng, draft.category);
   }, [draft.lat, draft.lng, draft.category, checkRadius]);
+
+  // Listen to JuryPanel simulated GPS & sample photo capture events (US-010)
+  useEffect(() => {
+    const offGps = onJuryEvent("gps", (coords: { lat: number; lng: number; accuracyMeters?: number }) => {
+      setGpsDenied(false);
+      setDraft((prev) => ({
+        ...prev,
+        lat: Number(Number(coords.lat).toFixed(6)),
+        lng: Number(Number(coords.lng).toFixed(6)),
+        gpsAccuracyMeters: coords.accuracyMeters ?? 10,
+      }));
+      showToast({ type: "info", message: "Koordinat GPS simulasi juri diterapkan." });
+    });
+
+    const offCapture = onJuryEvent(
+      "capture",
+      async (detail: { samplePath: string; lat?: number; lng?: number }) => {
+        try {
+          const photoBase64 = await fetchSampleAsBase64(detail.samplePath);
+          setDraft((prev) => ({
+            ...prev,
+            photoBase64,
+            isLowQualityOverride: false,
+            ...(detail.lat !== undefined && detail.lng !== undefined
+              ? {
+                  lat: Number(Number(detail.lat).toFixed(6)),
+                  lng: Number(Number(detail.lng).toFixed(6)),
+                  gpsAccuracyMeters: 10,
+                }
+              : {}),
+          }));
+          showToast({ type: "success", message: "Foto sampel simulasi juri siap dikirim." });
+        } catch (err) {
+          showToast({ type: "error", error: err });
+        }
+      }
+    );
+
+    return () => {
+      offGps();
+      offCapture();
+    };
+  }, [showToast]);
 
   const requestGps = useCallback(() => {
     if (!navigator.geolocation) {
@@ -187,7 +237,9 @@ export default function LaporPage() {
   const handleSupport = async (ticketId: string) => {
     setSupportingId(ticketId);
     try {
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = {
+        ...getJuryHeaders(),
+      };
       if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`;
       }
@@ -232,6 +284,7 @@ export default function LaporPage() {
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        ...getJuryHeaders(),
       };
       if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`;

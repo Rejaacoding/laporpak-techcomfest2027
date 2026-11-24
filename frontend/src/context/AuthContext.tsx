@@ -7,6 +7,13 @@ import {
 } from "react";
 import { supabase } from "../lib/supabase.ts";
 import { humanizeError } from "../lib/humanize.js";
+import {
+  clearJurySessionState,
+  getJuryHeaders,
+  getJurySessionState,
+  JURY_ROLE_KEY,
+  JURY_TOKEN_KEY,
+} from "../lib/api.js";
 
 export type UserRole = "WARGA" | "ADMIN_DINAS";
 
@@ -20,11 +27,13 @@ export interface AuthUserProfile {
   frozenUntil: string | null;
   cooldownUntil: string | null;
   activeTicketCount?: number;
+  juryMode?: boolean;
 }
 
 interface AuthContextValue {
   user: AuthUserProfile | null;
   accessToken: string | null;
+  isJuryMode: boolean;
   loading: boolean;
   sessionExpired: boolean;
   clearSessionExpired: () => void;
@@ -33,11 +42,13 @@ interface AuthContextValue {
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: (tokenOverride?: string) => Promise<AuthUserProfile | null>;
+  switchJuryRole: (roleKey: string, juryTokenOverride?: string) => Promise<AuthUserProfile | null>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   accessToken: null,
+  isJuryMode: false,
   loading: true,
   sessionExpired: false,
   clearSessionExpired: () => {},
@@ -52,12 +63,20 @@ const AuthContext = createContext<AuthContextValue>({
   },
   signOut: async () => {},
   refreshProfile: async () => null,
+  switchJuryRole: async () => null,
 });
 
-async function fetchMe(token: string): Promise<AuthUserProfile> {
-  const res = await fetch("/api/auth/me", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+async function fetchMe(
+  token: string | null,
+  juryOverride?: { juryToken?: string; juryRole?: string }
+): Promise<AuthUserProfile> {
+  const headers: Record<string, string> = {
+    ...getJuryHeaders(juryOverride),
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch("/api/auth/me", { headers });
 
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
@@ -78,6 +97,7 @@ async function fetchMe(token: string): Promise<AuthUserProfile> {
     frozenUntil: data.frozenUntil ?? null,
     cooldownUntil: data.cooldownUntil ?? null,
     activeTicketCount: data.activeTicketCount,
+    juryMode: Boolean(data.juryMode),
   };
 }
 
@@ -116,12 +136,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    const { juryToken, juryRole } = getJurySessionState();
+
     if (!supabase) {
-      setLoading(false);
-      return;
+      if (juryToken) {
+        fetchMe(null, { juryToken, juryRole })
+          .then((profile) => {
+            if (mounted) setUser(profile);
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (mounted) setLoading(false);
+          });
+      } else {
+        setLoading(false);
+      }
+      return () => {
+        mounted = false;
+      };
     }
 
-    let mounted = true;
     supabase.auth
       .getSession()
       .then(async ({ data }) => {
@@ -129,6 +164,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const token = data.session?.access_token ?? null;
         if (token) {
           await syncWithBackend(token).catch(() => {});
+        } else if (juryToken) {
+          const profile = await fetchMe(null, { juryToken, juryRole }).catch(() => null);
+          if (mounted && profile) setUser(profile);
         }
       })
       .finally(() => {
@@ -220,18 +258,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     await supabase?.auth.signOut().catch(() => {});
+    clearJurySessionState();
     setUser(null);
     setAccessToken(null);
     setSessionExpired(false);
   }, []);
 
+  const switchJuryRole = useCallback(
+    async (roleKey: string, juryTokenOverride?: string) => {
+      const state = getJurySessionState();
+      const juryToken = juryTokenOverride || state.juryToken;
+      if (!juryToken) return null;
+      sessionStorage.setItem(JURY_TOKEN_KEY, juryToken);
+      sessionStorage.setItem(JURY_ROLE_KEY, roleKey);
+      const profile = await fetchMe(null, { juryToken, juryRole: roleKey });
+      setAccessToken(null);
+      setUser(profile);
+      setSessionExpired(false);
+      return profile;
+    },
+    []
+  );
+
   const refreshProfile = useCallback(
     async (tokenOverride?: string) => {
       const token = tokenOverride || accessToken;
-      if (!token) return null;
-      return syncWithBackend(token);
+      if (token) {
+        return syncWithBackend(token);
+      }
+      const { juryToken, juryRole } = getJurySessionState();
+      if (juryToken) {
+        return switchJuryRole(juryRole, juryToken);
+      }
+      return null;
     },
-    [accessToken, syncWithBackend]
+    [accessToken, syncWithBackend, switchJuryRole]
   );
 
   return (
@@ -239,6 +300,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         accessToken,
+        isJuryMode: Boolean(user?.juryMode || getJurySessionState().juryToken),
         loading,
         sessionExpired,
         clearSessionExpired,
@@ -247,6 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithGoogle,
         signOut,
         refreshProfile,
+        switchJuryRole,
       }}
     >
       {children}
