@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Civic Tactical Design System — 3 Progressive Depth Themes (docs/design.md §1) */
+:root,
+[data-theme="warm"] {
+  --bg: #FFFBF5;
+  --surface: #FFFFFF;
+  --surface-2: #FEF3E2;
+  --line: #E7DFD3;
+  --fg: #1C1917;
+  --fg-muted: #57534E;
+  --brand: #0F766E;
+  --brand-fg: #FFFFFF;
+  --brand-soft: #CCFBF1;
+  color-scheme: light;
+}
+
+[data-theme="blueprint"] {
+  --bg: #EFF6FF;
+  --surface: #FFFFFF;
+  --surface-2: #DBEAFE;
+  --line: #BFDBFE;
+  --fg: #0F172A;
+  --fg-muted: #475569;
+  --brand: #0F766E;
+  --brand-fg: #FFFFFF;
+  --brand-soft: #CCFBF1;
+  color-scheme: light;
+}
+
+[data-theme="slate"] {
+  --bg: #0F172A;
+  --surface: #1E293B;
+  --surface-2: #273449;
+  --line: #334155;
+  --fg: #F1F5F9;
+  --fg-muted: #94A3B8;
+  --brand: #2DD4BF;
+  --brand-fg: #042F2E;
+  --brand-soft: #134E4A;
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-fg font-sans antialiased text-base;
+  }
+
+  /* Respect user motion preferences globally */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      scroll-behavior: auto !important;
+    }
+  }
+}

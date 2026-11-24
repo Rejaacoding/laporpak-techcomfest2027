@@ -1,0 +1,12 @@
+import { useAuth } from "../../context/AuthContext.tsx";
+
+/**
+ * Hides citizen-only UI (e.g. Lapor Kerusakan CTA & ProfileDrawer) from ADMIN_DINAS.
+ */
+export function CitizenOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (user?.role === "ADMIN_DINAS") {
+    return null;
+  }
+  return <>{children}</>;
+}
