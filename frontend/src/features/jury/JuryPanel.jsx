@@ -39,7 +39,7 @@ export default function JuryPanel({
   const [lng, setLng] = useState(112.7181);
 
   const [samples, setSamples] = useState([]);
-  const [selectedSample, setSelectedSample] = useState('');
+  const [selectedSample, setSelectedSample] = useState('/samples/jalan_berlubang.webp');
 
   const [ticketId, setTicketId] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
@@ -293,7 +293,7 @@ export default function JuryPanel({
               type="text"
               value={ticketId}
               onChange={(e) => setTicketId(e.target.value)}
-              placeholder="Masukkan Ticket ID (UUID)"
+              placeholder="ID Tiket Demo (mis. seed-tkt-04)"
               className="w-full rounded border border-neutral-300 px-2 py-1 mb-1.5"
             />
             <div className="flex gap-1.5">

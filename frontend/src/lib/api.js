@@ -2,6 +2,60 @@ const API_BASE = "/api";
 
 export const JURY_TOKEN_KEY = "laporpak_jury_token";
 export const JURY_ROLE_KEY = "laporpak_jury_role";
+const INSTALL_ID_KEY = "laporpak_install_id_v1";
+const fpCache = new Map();
+
+function getClientInstallId() {
+  if (typeof window === "undefined") return "ssr";
+  try {
+    let id = localStorage.getItem(INSTALL_ID_KEY);
+    if (!id) {
+      id =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `inst-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+      localStorage.setItem(INSTALL_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return "ephemeral";
+  }
+}
+
+export async function getDeviceFingerprint(juryOverride = {}) {
+  if (typeof window === "undefined") return "fp-ssr";
+  const state = getJurySessionState();
+  const juryToken = juryOverride.juryToken ?? state.juryToken;
+  const juryRole = juryOverride.juryRole ?? state.juryRole;
+  const scope = juryToken ? `jury:${juryRole || "WARGA_PELAPOR"}` : "citizen";
+  if (fpCache.has(scope)) return fpCache.get(scope);
+
+  const installId = getClientInstallId();
+  const screenSize =
+    typeof window.screen !== "undefined"
+      ? `${window.screen.width}x${window.screen.height}`
+      : "0x0";
+  const raw = `${installId}|${navigator.userAgent || ""}|${screenSize}|${navigator.hardwareConcurrency || 0}|${scope}`;
+
+  let fp = "";
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+    fp = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } else {
+    // shortcut: fallback non-HTTPS dev hash; upgrade tidak perlu karena produksi selalu HTTPS
+    let h = 2166136261;
+    for (let i = 0; i < raw.length; i++) {
+      h ^= raw.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    fp = `fp-${(h >>> 0).toString(16)}-${installId.slice(0, 16)}`;
+  }
+
+  fpCache.set(scope, fp);
+  return fp;
+}
 
 export function getJurySessionState() {
   if (typeof window === "undefined") {
@@ -71,7 +125,9 @@ export async function apiRequest(
   path,
   { method = "GET", token, body, idempotencyKey, headers = {}, juryOverride } = {}
 ) {
+  const deviceFp = await getDeviceFingerprint(juryOverride);
   const finalHeaders = {
+    "X-Device-Fingerprint": deviceFp,
     ...getJuryHeaders(juryOverride),
     ...headers,
   };

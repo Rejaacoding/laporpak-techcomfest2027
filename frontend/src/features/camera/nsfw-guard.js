@@ -6,7 +6,10 @@ async function loadNsfwModel() {
     cachedModelPromise = (async () => {
       const nsfwjs = await import('nsfwjs');
       return nsfwjs.load();
-    })();
+    })().catch((err) => {
+      cachedModelPromise = null;
+      throw err;
+    });
   }
   return cachedModelPromise;
 }

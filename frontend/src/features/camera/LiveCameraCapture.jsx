@@ -46,6 +46,8 @@ export default function LiveCameraCapture({
   const [isProcessing, setIsProcessing] = useState(false);
   const [blurAttempts, setBlurAttempts] = useState(0);
   const [lastMetrics, setLastMetrics] = useState(null);
+  const [cameraError, setCameraError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   const nightRelaxed = isNightRelaxationActive(categoryCode);
 
@@ -58,9 +60,13 @@ export default function LiveCameraCapture({
     }
 
     let active = true;
+    setErrorMsg('');
+    setCameraError(false);
+    setBlurAttempts(0);
+    setLastMetrics(null);
+
     async function initCamera() {
       try {
-        setErrorMsg('');
         const { stream } = await startLiveRearCamera(videoRef.current);
         if (!active) {
           stopLiveCameraStream(stream);
@@ -69,10 +75,12 @@ export default function LiveCameraCapture({
         streamRef.current = stream;
         setCameraReady(true);
       } catch (err) {
+        if (!active) return;
+        setCameraError(true);
         if (err?.message === 'VIRTUAL_CAMERA_BLOCKED') {
           setErrorMsg('Kamera virtual (OBS/ManyCam/Virtual) diblokir. Gunakan kamera fisik perangkat.');
         } else {
-          setErrorMsg('Kamera gagal dibuka. Pastikan izin kamera aktif dan menggunakan HTTPS.');
+          setErrorMsg('Izin kamera mati atau gagal dibuka. Ketuk ikon gembok di bilah alamat, pilih Izinkan Kamera, lalu tekan Coba Lagi.');
         }
       }
     }
@@ -83,7 +91,7 @@ export default function LiveCameraCapture({
       stopLiveCameraStream(streamRef.current);
       streamRef.current = null;
     };
-  }, [open]);
+  }, [open, retryTick]);
 
   if (!open) return null;
 
@@ -102,12 +110,12 @@ export default function LiveCameraCapture({
       const { meanLuminance, laplacianVariance } = result.metrics;
       setLastMetrics(result.metrics);
 
-      // Evaluasi cahaya (relaksasi malam 18.00-05.30 WIB untuk Darurat/PJU/Saluran Tersumbat)
+      // Evaluasi cahaya BT.601 (PRD #25: Y >= 35 normal, Y >= 12 malam untuk 3 Darurat + PJU + Saluran)
       if (meanLuminance > 245) {
         setErrorMsg('Foto terlalu silau (overexposed). Arahkan ulang kamera.');
         return;
       }
-      const minLuminance = nightRelaxed ? 4 : 12;
+      const minLuminance = nightRelaxed ? 12 : 35;
       if (meanLuminance < minLuminance) {
         setErrorMsg(
           nightRelaxed
@@ -140,7 +148,7 @@ export default function LiveCameraCapture({
         const nsfw = await checkImageNsfwWithFailSafe(img);
 
         if (nsfw.isNsfw) {
-          setErrorMsg('Foto ditolak oleh filter keamanan konten (>= 0.85).');
+          setErrorMsg('Foto diblokir filter keamanan konten (>= 0.85). Mengunggah konten tidak pantas berisiko penalti skor -0.5 dan jeda 24 jam.');
           return;
         }
         if (nsfw.needsRetry) {
@@ -223,8 +231,17 @@ export default function LiveCameraCapture({
         </div>
 
         {errorMsg && (
-          <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 border border-red-200">
-            {errorMsg}
+          <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 border border-red-200 space-y-2">
+            <p>{errorMsg}</p>
+            {cameraError && (
+              <button
+                type="button"
+                onClick={() => setRetryTick((t) => t + 1)}
+                className="rounded-md bg-red-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-800"
+              >
+                Coba Lagi
+              </button>
+            )}
           </div>
         )}
 

@@ -137,8 +137,8 @@ export async function captureCompressedPhotoFromVideo({
 
   const metrics = estimateCanvasMetrics(canvas);
 
-  // Tempel watermark WIB + koordinat publik di bagian bawah
-  const watermarkText = `${formatWibTimestamp()} | ${Number(publicLat).toFixed(5)}, ${Number(publicLng).toFixed(5)}`;
+  // Tempel watermark WIB + koordinat publik 4 desimal (~11 m, PRD US-009)
+  const watermarkText = `${formatWibTimestamp()} | ${Number(publicLat).toFixed(4)}, ${Number(publicLng).toFixed(4)}`;
   const barHeight = Math.max(24, Math.round(targetH * 0.045));
   ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
   ctx.fillRect(0, targetH - barHeight, targetW, barHeight);

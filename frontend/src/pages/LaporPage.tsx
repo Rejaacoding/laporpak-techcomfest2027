@@ -16,6 +16,7 @@ import { CATEGORIES, SLA_TIERS } from "../constants/designTokens.js";
 import { humanizeError } from "../lib/humanize.js";
 import {
   fetchSampleAsBase64,
+  getDeviceFingerprint,
   getJuryHeaders,
   onJuryEvent,
 } from "../lib/api.js";
@@ -284,8 +285,10 @@ export default function LaporPage() {
 
     setSubmitting(true);
     try {
+      const deviceFp = await getDeviceFingerprint();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        "X-Device-Fingerprint": deviceFp,
         ...getJuryHeaders(),
       };
       if (accessToken) {
