@@ -6,15 +6,16 @@ import {
 } from './webrtc-capture.js';
 import { checkImageNsfwWithFailSafe } from './nsfw-guard.js';
 
+const NIGHT_ELIGIBLE_RE =
+  /DARURAT|JALAN_AMBLES|KABEL_MENJUNTAI|POHON_TUMBANG|PJU|LAMPU|SALURAN|DRAINASE|TERSUMBAT/i;
+
 function isNightRelaxationActive(categoryCode = '') {
   const nowWib = new Date(
     new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' })
   );
   const minutes = nowWib.getHours() * 60 + nowWib.getMinutes();
   const isNightTime = minutes >= 18 * 60 || minutes <= 5 * 60 + 30; // 18:00 - 05:30 WIB
-  const isEligibleCategory = /DARURAT|PJU|LAMPU|SALURAN|DRAINASE|TERSUMBAT/i.test(
-    String(categoryCode || '')
-  );
+  const isEligibleCategory = NIGHT_ELIGIBLE_RE.test(String(categoryCode || ''));
   return isNightTime && isEligibleCategory;
 }
 
@@ -154,6 +155,7 @@ export default function LiveCameraCapture({
             photoBase64,
             isLowQualityOverride,
             isNsfwPendingReview: nsfw.isNsfwPendingReview,
+            clientNsfwScore: nsfw.explicitScore ?? 0,
           });
         }
         if (onCaptureSuccess) {
@@ -167,6 +169,7 @@ export default function LiveCameraCapture({
             watermarkText: result.watermarkText,
             isLowQualityOverride,
             isNsfwPendingReview: nsfw.isNsfwPendingReview,
+            clientNsfwScore: nsfw.explicitScore ?? 0,
             categoryCode,
           });
         }

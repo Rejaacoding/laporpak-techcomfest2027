@@ -29,7 +29,12 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
       scores[p.className] = Number(p.probability.toFixed(4));
     }
 
-    const explicitScore = Math.max(scores.Porn || 0, scores.Hentai || 0, (scores.Porn || 0) + (scores.Hentai || 0));
+    const rawExplicit = Math.max(
+      scores.Porn || 0,
+      scores.Hentai || 0,
+      (scores.Porn || 0) + (scores.Hentai || 0)
+    );
+    const explicitScore = Math.min(1, Number(rawExplicit.toFixed(4)));
 
     // >= 0.85 : Blokir langsung
     if (explicitScore >= 0.85) {
@@ -39,6 +44,7 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
         needsRetry: false,
         isNsfwPendingReview: false,
         timedOut: false,
+        explicitScore,
         scores,
       };
     }
@@ -51,6 +57,7 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
         needsRetry: true,
         isNsfwPendingReview: false,
         timedOut: false,
+        explicitScore,
         scores,
       };
     }
@@ -61,6 +68,7 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
       needsRetry: false,
       isNsfwPendingReview: false,
       timedOut: false,
+      explicitScore,
       scores,
     };
   } catch (err) {
@@ -71,6 +79,7 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
       needsRetry: false,
       isNsfwPendingReview: true,
       timedOut: err?.message === 'NSFW_TIMEOUT',
+      explicitScore: 0,
       scores: null,
     };
   } finally {

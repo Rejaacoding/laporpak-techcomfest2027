@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -61,6 +61,7 @@ interface DraftState {
   description: string;
   photoBase64: string | null;
   isLowQualityOverride: boolean;
+  clientNsfwScore: number;
   idempotencyKey: string;
 }
 
@@ -81,6 +82,7 @@ function loadDraft(): DraftState {
     description: "",
     photoBase64: null,
     isLowQualityOverride: false,
+    clientNsfwScore: 0,
     idempotencyKey: createIdempotencyKey(),
   };
 
@@ -319,7 +321,7 @@ export default function LaporPage() {
           captureNonce,
           photoBase64: draft.photoBase64,
           isLowQualityOverride: draft.isLowQualityOverride,
-          clientNsfwScore: 0,
+          clientNsfwScore: draft.clientNsfwScore ?? 0,
         }),
       });
       const ticketPayload = await ticketRes.json().catch(() => null);
@@ -402,7 +404,7 @@ export default function LaporPage() {
       <div className="max-w-2xl mx-auto space-y-6">
         <header className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-wider text-brand">
-            Lapor Tanpa Ribet Â· Surabaya & Sidoarjo
+            Lapor Tanpa Ribet · Surabaya & Sidoarjo
           </p>
           <h1 className="font-head font-bold text-2xl md:text-3xl">
             Laporkan Kerusakan Fasilitas
@@ -467,7 +469,7 @@ export default function LaporPage() {
                 <span>
                   {draft.lat.toFixed(4)}, {draft.lng.toFixed(4)}
                   {draft.gpsAccuracyMeters !== null &&
-                    ` Â· Akurasi ${draft.gpsAccuracyMeters} m`}
+                    ` · Akurasi ${draft.gpsAccuracyMeters} m`}
                 </span>
               </div>
             </div>
@@ -482,8 +484,8 @@ export default function LaporPage() {
                   Izin lokasi (GPS) mati di browsermu
                 </p>
                 <p className="text-xs leading-relaxed">
-                  Ketuk ikon gembok di bilah alamat â†’ pilih{" "}
-                  <strong>Izinkan Lokasi</strong> â†’ lalu tekan tombol{" "}
+                  Ketuk ikon gembok di bilah alamat → pilih{" "}
+                  <strong>Izinkan Lokasi</strong> → lalu tekan tombol{" "}
                   <strong>Coba Lagi</strong>.
                 </p>
                 <Button variant="secondary" density="dinas" onClick={requestGps}>
@@ -538,7 +540,7 @@ export default function LaporPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <StatusBadge status={t.status} size="sm" />
                           <span className="text-xs font-mono text-fg-muted">
-                            {Math.round(t.distanceMeters)} m Â· {t.supportCount} dukungan
+                            {Math.round(t.distanceMeters)} m · {t.supportCount} dukungan
                           </span>
                         </div>
                         <p className="text-sm font-medium text-fg truncate">
@@ -581,7 +583,7 @@ export default function LaporPage() {
                 </p>
                 <p className="text-xs text-fg-muted">
                   Galeri dinonaktifkan untuk mencegah foto lama/rekayasa. Titik
-                  koordinat disamarkan Â±11 m di peta publik.
+                  koordinat disamarkan ±11 m di peta publik.
                 </p>
               </div>
             </div>
@@ -707,11 +709,12 @@ export default function LaporPage() {
         open={cameraOpen}
         gpsAccuracy={draft.gpsAccuracyMeters}
         onClose={() => setCameraOpen(false)}
-        onCapture={({ photoBase64, isLowQualityOverride }) => {
+        onCapture={({ photoBase64, isLowQualityOverride, clientNsfwScore }) => {
           setDraft((prev) => ({
             ...prev,
             photoBase64,
             isLowQualityOverride,
+            clientNsfwScore: clientNsfwScore ?? 0,
           }));
           setCameraOpen(false);
         }}
