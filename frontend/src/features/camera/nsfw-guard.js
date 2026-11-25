@@ -4,7 +4,6 @@ let cachedModelPromise = null;
 async function loadNsfwModel() {
   if (!cachedModelPromise) {
     cachedModelPromise = (async () => {
-      // Lazy-load dinamis agar bundle awal tetap ringan (< 2s)
       const nsfwjs = await import('nsfwjs');
       return nsfwjs.load();
     })();
@@ -30,26 +29,27 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
       scores[p.className] = Number(p.probability.toFixed(4));
     }
 
-    const pornScore = (scores.Porn || 0) + (scores.Hentai || 0);
-    const sexyScore = scores.Sexy || 0;
+    const explicitScore = Math.max(scores.Porn || 0, scores.Hentai || 0, (scores.Porn || 0) + (scores.Hentai || 0));
 
-    // Zona 1: Tolak langsung jika konten eksplisit tinggi
-    if (pornScore >= 0.65) {
+    // >= 0.85 : Blokir langsung
+    if (explicitScore >= 0.85) {
       return {
         status: 'BLOCKED',
         isNsfw: true,
+        needsRetry: false,
         isNsfwPendingReview: false,
         timedOut: false,
         scores,
       };
     }
 
-    // Zona 2: Abu-abu -> masuk review privat (Signed URL 60s)
-    if (pornScore >= 0.35 || sexyScore >= 0.70) {
+    // 0.55 - 0.84 : Minta foto ulang
+    if (explicitScore >= 0.55) {
       return {
-        status: 'PENDING_REVIEW',
+        status: 'RETRY',
         isNsfw: false,
-        isNsfwPendingReview: true,
+        needsRetry: true,
+        isNsfwPendingReview: false,
         timedOut: false,
         scores,
       };
@@ -58,15 +58,17 @@ export async function checkImageNsfwWithFailSafe(imageElementOrCanvas, timeoutMs
     return {
       status: 'SAFE',
       isNsfw: false,
+      needsRetry: false,
       isNsfwPendingReview: false,
       timedOut: false,
       scores,
     };
   } catch (err) {
-    // Fail-safe: jika model gagal muat atau > 4 detik, lolos ke private bucket untuk review
+    // Fail-safe > 4 detik / gagal muat model -> lolos ke private bucket untuk review
     return {
       status: 'PENDING_REVIEW',
       isNsfw: false,
+      needsRetry: false,
       isNsfwPendingReview: true,
       timedOut: err?.message === 'NSFW_TIMEOUT',
       scores: null,
