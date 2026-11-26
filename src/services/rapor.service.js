@@ -4,11 +4,11 @@ import { redis } from "../lib/redis.js";
 import { evaluateActiveTicketsBatch } from "./lazy-eval.service.js";
 
 export async function getRaporData({ category } = {}) {
-  await evaluateActiveTicketsBatch();
-
   const cacheKey = `cache:rapor:${category || "all"}`;
   const cached = await redis.getJson(cacheKey);
   if (cached) return cached;
+
+  await evaluateActiveTicketsBatch();
 
   const [departments, tickets] = await Promise.all([
     prisma.department.findMany({ orderBy: { integrityScore: "desc" } }),

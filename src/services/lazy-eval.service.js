@@ -1,6 +1,6 @@
 import { LIMITS, SCORE_RULES } from "../shared/constants.js";
 import { prisma } from "../lib/prisma.js";
-import { invalidatePublicCaches } from "../lib/redis.js";
+import { invalidatePublicCaches, redis } from "../lib/redis.js";
 import { appendAuditLog } from "../repositories/audit.repository.js";
 import { adjustDepartmentScore } from "../repositories/department.repository.js";
 import { applyTrustReward } from "../repositories/user.repository.js";
@@ -200,11 +200,17 @@ export async function evaluateTicketLazy(ticketId) {
   return prisma.ticket.findUnique({ where: { id: ticketId } });
 }
 
-export async function evaluateActiveTicketsBatch() {
+export async function evaluateActiveTicketsBatch({ force = false } = {}) {
+  if (!force) {
+    const acquired = await redis.setNx("lazy:batch:throttle", "1", 30);
+    if (!acquired) return;
+  }
+
   const now = new Date();
-  const disputeCutoff = new Date(now.getTime() - LIMITS.DISPUTE_RESPONSE_HOURS * 3600 * 1000);
+  const nowMs = now.getTime();
+  const disputeCutoff = new Date(nowMs - LIMITS.DISPUTE_RESPONSE_HOURS * 3600 * 1000);
   const autoCloseCutoff = new Date(
-    now.getTime() - LIMITS.PUBLIC_VALIDATION_AUTO_CLOSE_HOURS * 3600 * 1000
+    nowMs - LIMITS.PUBLIC_VALIDATION_AUTO_CLOSE_HOURS * 3600 * 1000
   );
 
   const candidates = await prisma.ticket.findMany({
@@ -216,11 +222,23 @@ export async function evaluateActiveTicketsBatch() {
         { status: "PENDING_VALIDATION", validationStartedAt: { lt: autoCloseCutoff } },
       ],
     },
-    select: { id: true },
+    select: {
+      id: true,
+      status: true,
+      slaDeadline: true,
+      slaInitialHours: true,
+      isChronicOverdue: true,
+    },
     take: 50,
   });
 
-  for (const row of candidates) {
-    await evaluateTicketLazy(row.id);
-  }
+  const actionable = candidates.filter((row) => {
+    if (row.status === "OVERDUE" && !row.isChronicOverdue) {
+      return nowMs - new Date(row.slaDeadline).getTime() > row.slaInitialHours * 3600 * 1000;
+    }
+    return true;
+  });
+
+  if (actionable.length === 0) return;
+  await Promise.all(actionable.map((row) => evaluateTicketLazy(row.id)));
 }

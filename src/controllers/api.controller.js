@@ -339,7 +339,7 @@ export async function aktivasiMitraController(req, res, next) {
 
 export async function cronSlaController(_req, res, next) {
   try {
-    await evaluateActiveTicketsBatch();
+    await evaluateActiveTicketsBatch({ force: true });
 
     const expiredQuarantine = await prisma.ticket.findMany({
       where: {

@@ -312,11 +312,11 @@ export async function createTicket({ req, body }) {
 }
 
 export async function listPublicTickets(query) {
-  await evaluateActiveTicketsBatch();
-
   const cacheKey = `cache:tickets:${query.category || "all"}:${query.status || "all"}:${query.departmentId || "all"}`;
   const cached = await redis.getJson(cacheKey);
   if (cached) return cached;
+
+  await evaluateActiveTicketsBatch();
 
   const where = {
     status: query.status ? query.status : { not: "REJECTED_SPAM" },
