@@ -1,11 +1,13 @@
-export { Button } from "./Button.jsx";
+export { Button } from "./Button.tsx";
+export { Badge } from "./Badge.tsx";
 export {
   Card,
   CardHeader,
   CardTitle,
   CardContent,
   CardFooter,
-} from "./Card.jsx";
+} from "./Card.tsx";
+export { Input, Textarea } from "./Input.tsx";
 export { Modal } from "./Modal.jsx";
 export {
   Skeleton,

@@ -2,18 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Civic Tactical Design System — 3 Progressive Depth Themes (docs/design.md §1) */
+/* ============================================================================
+   LaporPAK! Design System Tokens — Extracted from Figma "LaporPAK! — Design System & UI Kit"
+   Themes: warm (default), blueprint, slate (Progressive Depth, docs/design.md §1)
+   ============================================================================ */
+
 :root,
 [data-theme="warm"] {
+  /* Surface, Background & Border */
   --bg: #FFFBF5;
   --surface: #FFFFFF;
   --surface-2: #FEF3E2;
   --line: #E7DFD3;
+
+  /* Text */
   --fg: #1C1917;
   --fg-muted: #57534E;
+
+  /* Primary / Brand (Teal Civic Friendly) */
   --brand: #0F766E;
   --brand-fg: #FFFFFF;
   --brand-soft: #CCFBF1;
+
+  /* Semantic System Feedback */
+  --semantic-success: #15803D;
+  --semantic-success-soft: #F0FDF4;
+  --semantic-warning: #92400E;
+  --semantic-warning-soft: #FFFBEB;
+  --semantic-error: #B91C1C;
+  --semantic-error-soft: #FEF2F2;
+  --semantic-info: #075985;
+  --semantic-info-soft: #F0F9FF;
+
+  /* Ticket Status Tokens (10 Statuses) */
+  --status-open: #2563EB;
+  --status-in-progress: #EAB308;
+  --status-pending-validation: #F97316;
+  --status-closed: #16A34A;
+  --status-auto-closed: #86EFAC;
+  --status-overdue: #DC2626;
+  --status-disputed: #9333EA;
+  --status-escalated: #7F1D1D;
+  --status-out-of-scope: #9CA3AF;
+  --status-rejected-spam: #4B5563;
+
+  /* Radius & Elevation */
+  --radius-control: 0.75rem; /* 12px */
+  --radius-card: 1rem;       /* 16px */
+  --radius-sheet: 1.5rem;    /* 24px */
+
+  --shadow-card: 0 2px 6px 0 rgba(28, 25, 23, 0.05);
+  --shadow-elevated: 0 10px 24px -2px rgba(15, 118, 110, 0.14);
+  --shadow-popover: 0 6px 16px 0 rgba(15, 23, 42, 0.10);
+  --shadow-modal: 0 20px 40px -4px rgba(15, 23, 42, 0.25);
+
   color-scheme: light;
 }
 
@@ -40,12 +82,14 @@
   --brand: #2DD4BF;
   --brand-fg: #042F2E;
   --brand-soft: #134E4A;
+  --shadow-card: none;
+  --shadow-elevated: none;
   color-scheme: dark;
 }
 
 @layer base {
   body {
-    @apply bg-bg text-fg font-sans antialiased text-base;
+    @apply bg-bg text-fg font-sans antialiased text-base leading-6;
   }
 
   /* Respect user motion preferences globally */

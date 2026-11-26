@@ -17,6 +17,9 @@ import { CitizenOnly, RequireAuth } from "./components/auth/index.ts";
 import { Button, ToastProvider } from "./components/ui/index.js";
 import LoginPage from "./pages/LoginPage.tsx";
 import LaporPage from "./pages/LaporPage.tsx";
+import DinasDashboardPage from "./app/dinas/page.tsx";
+import DinasPetaPage from "./app/dinas/peta.tsx";
+import DinasRaporPage from "./app/dinas/rapor.tsx";
 import JuryPanel from "./features/jury/JuryPanel.jsx";
 
 function RouteThemeSync() {
@@ -31,7 +34,12 @@ function RouteThemeSync() {
 }
 
 function TopNav() {
+  const { pathname } = useLocation();
   const { user, signOut } = useAuth();
+
+  if (pathname.startsWith("/dinas") || pathname.startsWith("/rapor")) {
+    return null;
+  }
 
   return (
     <header className="h-16 bg-surface border-b border-line px-4 md:px-6 lg:px-8">
@@ -134,22 +142,30 @@ export default function App() {
               />
               <Route
                 path="/rapor"
-                element={
-                  <PageShell
-                    title="Rapor Integritas Dinas"
-                    subtitle="Halaman publik peringkat & audit kinerja dinas."
-                  />
-                }
+                element={<DinasRaporPage showSidebar={false} />}
               />
               <Route path="/lapor" element={<LaporPage />} />
               <Route
                 path="/dinas"
                 element={
                   <RequireAuth allowedRoles={["ADMIN_DINAS"]}>
-                    <PageShell
-                      title="Meja Kerja Dinas"
-                      subtitle="Khusus petugas instansi terdaftar."
-                    />
+                    <DinasDashboardPage />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/dinas/peta"
+                element={
+                  <RequireAuth allowedRoles={["ADMIN_DINAS"]}>
+                    <DinasPetaPage />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/dinas/rapor"
+                element={
+                  <RequireAuth allowedRoles={["ADMIN_DINAS"]}>
+                    <DinasRaporPage showSidebar />
                   </RequireAuth>
                 }
               />
