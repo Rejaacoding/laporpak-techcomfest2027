@@ -1,7 +1,16 @@
 import { Badge, Button, Card } from "../ui/index.js";
-import { DINAS_ALERTS } from "../../data/mockTickets.ts";
+
+export interface AlertTicketSummary {
+  id: string;
+  code: string;
+  title: string;
+  countdownText?: string;
+  appealUsed?: boolean;
+}
 
 export interface AlertBannersProps {
+  disputedTicket?: AlertTicketSummary | null;
+  escalatedTicket?: AlertTicketSummary | null;
   onProcessRework?: (ticketId: string) => void;
   onAppealEvidence?: (ticketId: string) => void;
   onUploadEscalation?: (ticketId: string) => void;
@@ -9,86 +18,99 @@ export interface AlertBannersProps {
 }
 
 /**
- * Priority Action Alerts — matched to Figma "Grid / Priority Action Alerts"
- * Displays DISPUTED 24h countdown banner (#FAF5FF / #D8B4FE) and
- * ESCALATED Berita Acara banner (#FEF2F2 / #FECACA).
+ * Priority Action Alerts for /dinas — driven 100% by real DISPUTED & ESCALATED tickets.
  */
 export function AlertBanners({
+  disputedTicket,
+  escalatedTicket,
   onProcessRework,
   onAppealEvidence,
   onUploadEscalation,
   className = "",
 }: AlertBannersProps) {
-  const { disputed, escalated } = DINAS_ALERTS;
+  if (!disputedTicket && !escalatedTicket) return null;
 
   return (
     <section
       aria-label="Peringatan prioritas tindak lanjut"
       className={[
-        "grid grid-cols-1 xl:grid-cols-2 gap-3.5",
+        "grid grid-cols-1 gap-3.5",
+        disputedTicket && escalatedTicket ? "xl:grid-cols-2" : "",
         className,
       ].join(" ")}
     >
-      {/* Disputed 24h Auto-Rework Banner */}
-      <Card
-        density="none"
-        className="!bg-purple-50 !border-purple-300 !shadow-none px-[18px] py-4 flex flex-col justify-between gap-2.5"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Badge status="DISPUTED" />
-          <span className="font-mono font-bold text-xs leading-4 text-purple-800 tabular-nums">
-            {disputed.countdownText}
-          </span>
-        </div>
+      {disputedTicket && (
+        <Card
+          density="none"
+          className="!bg-purple-50 !border-purple-300 !shadow-none px-[18px] py-4 flex flex-col justify-between gap-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Badge status="DISPUTED" />
+            <span className="font-mono font-bold text-xs leading-4 text-purple-800 tabular-nums">
+              {disputedTicket.countdownText || "Wajib respons ≤ 24 jam"}
+            </span>
+          </div>
 
-        <p className="font-sans text-sm leading-5 text-fg">
-          {disputed.description}
-        </p>
+          <p className="font-sans text-sm leading-5 text-fg">
+            <strong className="font-mono text-xs mr-1.5">
+              {disputedTicket.code}
+            </strong>
+            {disputedTicket.title} — dibantah warga. Pilih kerjakan ulang (+24
+            jam) atau ajukan banding bukti foto sudut baru.
+          </p>
 
-        <div className="flex flex-wrap items-center gap-2 pt-0.5">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => onProcessRework?.(disputed.ticketId)}
-          >
-            Proses Ulang
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => onAppealEvidence?.(disputed.ticketId)}
-          >
-            Ajukan Banding Bukti (1×)
-          </Button>
-        </div>
-      </Card>
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onProcessRework?.(disputedTicket.id)}
+            >
+              Proses Perbaikan Ulang
+            </Button>
+            {!disputedTicket.appealUsed && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onAppealEvidence?.(disputedTicket.id)}
+              >
+                Ajukan Banding Bukti (1×)
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
 
-      {/* Escalated Berita Acara Banner */}
-      <Card
-        density="none"
-        className="!bg-red-50 !border-red-200 !shadow-none px-[18px] py-4 flex flex-col justify-between gap-2.5"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Badge status="ESCALATED" />
-          <span className="font-mono font-bold text-xs leading-4 text-red-800 tabular-nums">
-            {escalated.penaltyText}
-          </span>
-        </div>
+      {escalatedTicket && (
+        <Card
+          density="none"
+          className="!bg-red-50 !border-red-200 !shadow-none px-[18px] py-4 flex flex-col justify-between gap-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Badge status="ESCALATED" />
+            <span className="font-mono font-bold text-xs leading-4 text-red-800 tabular-nums">
+              Penalti -5 poin permanen
+            </span>
+          </div>
 
-        <p className="font-sans text-sm leading-5 text-fg">
-          {escalated.description}
-        </p>
+          <p className="font-sans text-sm leading-5 text-fg">
+            <strong className="font-mono text-xs mr-1.5">
+              {escalatedTicket.code}
+            </strong>
+            {escalatedTicket.title} — wajib unggah Berita Acara (PDF/JPG/PNG &le;5
+            MB) dan foto lapangan langsung (&le;75 m) untuk menutup tiket.
+          </p>
 
-        <div className="flex flex-wrap items-center gap-2 pt-0.5">
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => onUploadEscalation?.(escalated.ticketId)}
-          >
-            Unggah Berita Acara &amp; Foto Live
-          </Button>
-        </div>
-      </Card>
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => onUploadEscalation?.(escalatedTicket.id)}
+            >
+              Unggah Berita Acara &amp; Foto Live
+            </Button>
+          </div>
+        </Card>
+      )}
     </section>
   );
 }

@@ -1,17 +1,30 @@
 import { Clock, MapPin, ThumbsUp } from "lucide-react";
 import { Badge, Button, Card } from "../ui/index.js";
-import type { DinasQueueFilterKey } from "../layout/DinasSidebar.tsx";
+import type { DinasQueueCounts, DinasQueueFilterKey } from "../layout/DinasSidebar.tsx";
 import type { DinasTicketRow, TicketActionItem } from "../../data/mockTickets.ts";
-import { TICKET_TABS } from "../../data/mockTickets.ts";
 
 export interface TicketTableProps {
   tickets: DinasTicketRow[];
   activeTab: DinasQueueFilterKey;
   onTabChange: (tab: DinasQueueFilterKey) => void;
+  counts?: Partial<DinasQueueCounts>;
   onAction?: (ticket: DinasTicketRow, action: TicketActionItem) => void;
   onResetFilters?: () => void;
   className?: string;
 }
+
+const TAB_DEFS: Array<{
+  key: DinasQueueFilterKey;
+  label: string;
+  countClass: string;
+}> = [
+  { key: "ALL", label: "Semua", countClass: "bg-brand-soft text-brand" },
+  { key: "OVERDUE", label: "Melewati Tenggat", countClass: "bg-red-100 text-red-800" },
+  { key: "DISPUTED", label: "Dibantah Warga", countClass: "bg-purple-100 text-purple-800" },
+  { key: "ESCALATED", label: "Eskalasi", countClass: "bg-red-900 text-red-50" },
+  { key: "PENDING_VALIDATION", label: "Menunggu Cek Warga", countClass: "bg-orange-100 text-orange-900" },
+  { key: "CLOSED", label: "Tuntas", countClass: "bg-green-100 text-green-800" },
+];
 
 const SLA_TONE_CLASSES: Record<DinasTicketRow["slaTone"], string> = {
   overdue: "text-semantic-error",
@@ -30,6 +43,7 @@ export function TicketTable({
   tickets,
   activeTab,
   onTabChange,
+  counts,
   onAction,
   onResetFilters,
   className = "",
@@ -45,8 +59,9 @@ export function TicketTable({
         aria-label="Filter status antrean"
         className="flex items-center gap-7 border-b border-line px-1 overflow-x-auto"
       >
-        {TICKET_TABS.map((tab) => {
+        {TAB_DEFS.map((tab) => {
           const active = activeTab === tab.key;
+          const count = counts?.[tab.key] ?? 0;
           return (
             <button
               key={tab.key}
@@ -72,7 +87,7 @@ export function TicketTable({
                   tab.countClass,
                 ].join(" ")}
               >
-                {tab.count}
+                {count}
               </span>
             </button>
           );

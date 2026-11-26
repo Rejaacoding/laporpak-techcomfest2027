@@ -25,14 +25,13 @@ export interface TopNavbarProps {
 
 const DEFAULT_NAV_ITEMS: TopNavbarNavItem[] = [
   { to: "/", label: "Peta Laporan" },
-  { to: "/lapor", label: "Buat Laporan", citizenOnly: true },
-  { to: "/dinas", label: "Antrean Dinas", roles: ["ADMIN_DINAS"] },
-  { to: "/rapor", label: "Rapor Publik" },
+  { to: "/lapor", label: "Lapor Kerusakan", citizenOnly: true },
+  { to: "/dinas", label: "Meja Dinas", roles: ["ADMIN_DINAS"] },
+  { to: "/rapor", label: "Catatan Kerja" },
 ];
 
 /**
- * Desktop Top Navigation Bar — matched to Figma "05 — Dashboard Dinas (/dinas)"
- * Height 64px (h-16), bg-bg (#FFFBF5), border-b border-line (#E7DFD3).
+ * Unified Top Navigation Bar across all LaporPAK! pages (warm / blueprint / slate).
  */
 export function TopNavbar({
   profileLabel,
@@ -51,13 +50,13 @@ export function TopNavbar({
   const resolvedProfileLabel =
     profileLabel ??
     (user?.role === "ADMIN_DINAS"
-      ? `Admin · ${user.departmentShortName || user.departmentName || "DPU Bina Marga"}`
+      ? `Admin · ${user.departmentShortName || user.departmentName || user.departmentId || "Dinas"}`
       : user?.aliasName || "Pengunjung Publik");
 
   return (
     <header
       className={[
-        "h-16 w-full bg-bg border-b border-line px-5",
+        "h-16 w-full bg-surface/95 backdrop-blur-sm border-b border-line px-4 md:px-5",
         "sticky top-0 z-30",
         className,
       ].join(" ")}

@@ -413,8 +413,8 @@ export default function LaporPage() {
             Laporkan Kerusakan Fasilitas
           </h1>
           <p className="text-sm text-fg-muted">
-            Langsung lapor dari lokasi kejadian tanpa perlu daftar akun. Draf
-            otomatis tersimpan aman di perangkatmu.
+            Ambil foto langsung di lokasi kejadian. Identitas aslimu otomatis
+            disamarkan dan draf tersimpan aman di perangkatmu.
           </p>
         </header>
 

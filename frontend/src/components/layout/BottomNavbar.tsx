@@ -122,14 +122,14 @@ export function BottomNavbar({
           </div>
         )}
 
-        {/* 4. Rapor */}
+        {/* 4. Catatan Kerja */}
         <Link
           to="/rapor"
           aria-current={resolvedActive === "rapor" ? "page" : undefined}
           className={tabClass(resolvedActive === "rapor")}
         >
           <BarChart3 className="size-[19px] shrink-0" aria-hidden="true" />
-          <span className="font-sans text-[11px] leading-[14px]">Rapor</span>
+          <span className="font-sans text-[11px] leading-[14px]">Catatan</span>
         </Link>
 
         {/* 5. Profil */}

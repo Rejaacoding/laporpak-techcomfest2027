@@ -1,657 +1,651 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronDown,
   Info,
+  MapPin,
+  RefreshCw,
   RotateCcw,
   ShieldCheck,
   Siren,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
-import { TopNavbar, DinasSidebar } from "../../components/layout/index.ts";
+import { DinasSidebar } from "../../components/layout/index.ts";
 import type { DinasQueueFilterKey } from "../../components/layout/index.ts";
-import { Badge, Button, Card } from "../../components/ui/index.js";
-import {
-  DINAS_DEPARTMENT_META,
-  DINAS_QUEUE_COUNTS,
-  RAPOR_CATEGORIES,
-  RAPOR_DINAS_SCORES,
-  RAPOR_HEATMAP_CLUSTERS,
-  RAPOR_KPI_STATS,
-  RAPOR_REGIONS,
-} from "../../data/mockTickets.ts";
+import { Badge, Button, Card, Skeleton } from "../../components/ui/index.js";
+import { CATEGORIES, TICKET_STATUSES } from "../../constants/designTokens.js";
+import { getRapor, onJuryEvent } from "../../lib/api.js";
+import { humanizeError } from "../../lib/humanize.js";
 
 export interface DinasRaporPageProps {
   /** Tampilkan DinasSidebar saat diakses admin dinas (/dinas/rapor) */
   showSidebar?: boolean;
 }
 
-const STAT_TONE_CLASSES: Record<string, string> = {
-  default: "text-fg",
-  brand: "text-brand",
-  error: "text-semantic-error",
-  purple: "text-purple-800",
+interface DepartmentCardData {
+  id: string;
+  code: string;
+  name: string;
+  shortName: string;
+  integrityScore: number;
+  totalTickets: number;
+  totalResolved: number;
+  onTimeResolved: number;
+  slaOnTimeRatio: number;
+  overdueCount: number;
+  chronicOverdueCnt: number;
+  isChronicWarning: boolean;
+  escalatedCount: number;
+  outOfScopeCount: number;
+  outOfScopeRatio: number;
+  outOfScopeWarning: boolean;
+  rejectedSpamCount: number;
+  rejectedSpamRatio: number;
+  rejectedSpamWarning: boolean;
+}
+
+interface ClusterPoint {
+  id: string;
+  category: string;
+  status: string;
+  lat: number;
+  lng: number;
+}
+
+interface RaporPayload {
+  scoreExplanation: string;
+  departments: DepartmentCardData[];
+  clusterPoints: ClusterPoint[];
+}
+
+const DEPT_SCOPE_HINTS: Record<string, string> = {
+  DISHUB: "Lampu jalan & kabel bahaya",
+  DPU: "Jalan rusak, ambles & saluran air",
+  DLH: "Sampah liar & pohon tumbang",
+  SATPOLPP: "Reklame & bangunan liar",
 };
 
+// Surabaya-Sidoarjo bounding box for clean relative dot placement on overview map
+const BOUNDS = {
+  minLat: -7.56,
+  maxLat: -7.18,
+  minLng: 112.55,
+  maxLng: 112.88,
+};
+
+function projectPoint(lat: number, lng: number) {
+  const x = ((lng - BOUNDS.minLng) / (BOUNDS.maxLng - BOUNDS.minLng)) * 100;
+  const y = ((BOUNDS.maxLat - lat) / (BOUNDS.maxLat - BOUNDS.minLat)) * 100;
+  return {
+    left: `${Math.min(92, Math.max(8, x)).toFixed(1)}%`,
+    top: `${Math.min(90, Math.max(10, y)).toFixed(1)}%`,
+  };
+}
+
+function getScoreBadgeClasses(score: number) {
+  if (score < 40) {
+    return "bg-semantic-error-soft text-semantic-error border-red-400/40";
+  }
+  if (score < 70) {
+    return "bg-semantic-warning-soft text-semantic-warning border-amber-400/40";
+  }
+  return "bg-semantic-success-soft text-semantic-success border-emerald-400/40";
+}
+
+function getScoreBarClasses(score: number) {
+  if (score < 40) return "bg-red-500";
+  if (score < 70) return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
+function getScoreVerdict(score: number) {
+  if (score >= 85) return "Sangat Baik";
+  if (score >= 70) return "Baik";
+  if (score >= 50) return "Perlu Perbaikan";
+  return "Kinerja Rendah";
+}
+
 /**
- * Rapor Kinerja & Integritas Dinas — sliced from Figma "08 — Rapor Publik (/rapor)"
- * Uses TopNavbar, optional DinasSidebar, StatCards, DinasScoreCards,
- * 6-column Comparison Matrix, and Cluster Heatmap + Mascot Empty State.
+ * Halaman Publik "Catatan Kerja Dinas" (/rapor) & tampilan dinas (/dinas/rapor).
+ * Terhubung 100% ke GET /api/rapor tanpa data mock dan bebas jargon teknis.
  */
-export function DinasRaporPage({ showSidebar = true }: DinasRaporPageProps) {
+export function DinasRaporPage({ showSidebar = false }: DinasRaporPageProps) {
   const { user } = useAuth();
-  const [sidebarFilter, setSidebarFilter] =
-    useState<DinasQueueFilterKey>("ALL");
-  const [selectedCategory, setSelectedCategory] = useState("ALL");
-  const [selectedRegion, setSelectedRegion] = useState("ALL");
+  const navigate = useNavigate();
 
-  const filteredClusters = useMemo(() => {
-    if (selectedCategory === "EMPTY_SAMPLE") return [];
-    return RAPOR_HEATMAP_CLUSTERS.filter((cl) => {
-      if (selectedRegion !== "ALL" && cl.region !== selectedRegion) {
-        return false;
-      }
-      return true;
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [data, setData] = useState<RaporPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const fetchRapor = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      const payload = await getRapor(
+        selectedCategory ? { category: selectedCategory } : {}
+      );
+      setData(payload);
+    } catch (err) {
+      setErrorMsg(humanizeError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    fetchRapor();
+  }, [fetchRapor]);
+
+  useEffect(() => {
+    return onJuryEvent("reset", () => {
+      fetchRapor();
     });
-  }, [selectedCategory, selectedRegion]);
+  }, [fetchRapor]);
 
-  const handleResetFilters = () => {
-    setSelectedCategory("ALL");
-    setSelectedRegion("ALL");
+  const departments = data?.departments || [];
+  const clusterPoints = data?.clusterPoints || [];
+
+  const summary = useMemo(() => {
+    const totalTickets = departments.reduce((sum, d) => sum + d.totalTickets, 0);
+    const totalResolved = departments.reduce((sum, d) => sum + d.totalResolved, 0);
+    const totalOnTime = departments.reduce((sum, d) => sum + d.onTimeResolved, 0);
+    const totalOverdue = departments.reduce((sum, d) => sum + d.overdueCount, 0);
+    const totalEscalated = departments.reduce((sum, d) => sum + d.escalatedCount, 0);
+    const avgScore =
+      departments.length > 0
+        ? Math.round(
+            departments.reduce((sum, d) => sum + d.integrityScore, 0) /
+              departments.length
+          )
+        : 0;
+    const onTimePct =
+      totalResolved > 0 ? Math.round((totalOnTime / totalResolved) * 100) : 100;
+
+    return {
+      totalTickets,
+      totalResolved,
+      totalOnTime,
+      totalOverdue,
+      totalEscalated,
+      avgScore,
+      onTimePct,
+    };
+  }, [departments]);
+
+  const currentUserDept = useMemo(
+    () => departments.find((d) => d.id === user?.departmentId),
+    [departments, user?.departmentId]
+  );
+
+  const handleSidebarFilter = (next: DinasQueueFilterKey) => {
+    navigate(next === "ALL" ? "/dinas" : `/dinas?status=${next}`);
   };
 
-  const departmentName =
-    user?.departmentName || DINAS_DEPARTMENT_META.departmentName;
-  const profileLabel =
-    user?.role === "ADMIN_DINAS"
-      ? `Admin · ${user.departmentShortName || DINAS_DEPARTMENT_META.departmentShortName}`
-      : user?.aliasName;
-
   return (
-    <div className="min-h-screen bg-bg text-fg flex flex-col">
-      <TopNavbar profileLabel={profileLabel} />
-
+    <div className="min-h-[calc(100vh-4rem)] bg-bg text-fg flex flex-col pb-20 md:pb-8">
       <div className="max-w-[1440px] w-full mx-auto flex-1 flex flex-col lg:flex-row">
         {showSidebar && user?.role === "ADMIN_DINAS" && (
           <DinasSidebar
-            departmentName={departmentName}
-            regionLabel={DINAS_DEPARTMENT_META.regionLabel}
-            isVerifiedPartner={DINAS_DEPARTMENT_META.isVerifiedPartner}
-            integrityScore={DINAS_DEPARTMENT_META.integrityScore}
-            activeFilter={sidebarFilter}
-            onFilterChange={setSidebarFilter}
-            counts={DINAS_QUEUE_COUNTS}
+            departmentName={
+              currentUserDept?.name || user?.departmentName || "Instansi Mitra"
+            }
+            regionLabel="Kota Surabaya & Kab. Sidoarjo"
+            isVerifiedPartner
+            integrityScore={currentUserDept?.integrityScore ?? 80}
+            activeFilter="ALL"
+            onFilterChange={handleSidebarFilter}
+            counts={{
+              ALL: currentUserDept?.totalTickets ?? 0,
+              OVERDUE: currentUserDept?.overdueCount ?? 0,
+              ESCALATED: currentUserDept?.escalatedCount ?? 0,
+            }}
           />
         )}
 
         <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-9 py-7 flex flex-col gap-6">
-          {/* SECTION A: Header & Panduan Rumus Skor */}
+          {/* Header & Filter Kategori */}
           <section
-            aria-label="Judul dan panduan skor integritas"
+            aria-label="Judul dan cara penilaian dinas"
             className="flex flex-col gap-3.5"
           >
-            <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+            <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="flex flex-col gap-1 min-w-0">
                 <h1 className="font-head font-bold text-2xl md:text-[30px] md:leading-9 text-fg">
-                  Rapor Kinerja &amp; Integritas Dinas
+                  Catatan Kerja Dinas
                 </h1>
                 <p className="font-sans text-sm leading-5 text-fg-muted">
-                  Papan transparansi publik 4 instansi mitra Kota Surabaya &amp;
-                  Kab. Sidoarjo · Diperbarui otomatis setiap transaksi selesai
+                  Papan nilai terbuka 4 instansi di Surabaya &amp; Sidoarjo ·
+                  Dihitung otomatis dari laporan lapangan dan ketepatan waktu
                 </p>
               </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 shrink-0">
-                <div className="relative w-full sm:w-[220px]">
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <div className="relative w-full sm:w-[250px]">
                   <select
-                    aria-label="Filter kategori laporan"
+                    aria-label="Filter jenis kerusakan"
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value)}
                     className="w-full min-h-[42px] appearance-none rounded-xl border border-line bg-surface pl-3.5 pr-9 font-sans font-semibold text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand cursor-pointer"
                   >
-                    {RAPOR_CATEGORIES.map((cat) => (
-                      <option key={cat.value} value={cat.value}>
+                    <option value="">Semua Jenis Kerusakan (8)</option>
+                    {CATEGORIES.map((cat) => (
+                      <option key={cat.code} value={cat.code}>
                         {cat.label}
                       </option>
                     ))}
                   </select>
                   <ChevronDown
-                    className="pointer-events-none size-4 text-fg-muted absolute right-3 top-1/2 -translate-y-1/2"
+                    className="size-4 text-fg-muted pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
                     aria-hidden="true"
                   />
                 </div>
-
-                <div className="relative w-full sm:w-[235px]">
-                  <select
-                    aria-label="Filter wilayah layanan"
-                    value={selectedRegion}
-                    onChange={(e) => setSelectedRegion(e.target.value)}
-                    className="w-full min-h-[42px] appearance-none rounded-xl border border-line bg-surface pl-3.5 pr-9 font-sans font-semibold text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand cursor-pointer"
-                  >
-                    {RAPOR_REGIONS.map((reg) => (
-                      <option key={reg.value} value={reg.value}>
-                        {reg.label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    className="pointer-events-none size-4 text-fg-muted absolute right-3 top-1/2 -translate-y-1/2"
-                    aria-hidden="true"
-                  />
-                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={fetchRapor}
+                  loading={loading}
+                  aria-label="Segarkan data catatan kerja"
+                >
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                  <span>Segarkan</span>
+                </Button>
               </div>
             </header>
 
-            {/* Formula Info Banner */}
-            <div
-              role="note"
-              className="rounded-[14px] bg-semantic-info-soft border border-sky-200 px-4 py-3 flex items-start sm:items-center gap-3"
-            >
+            {/* Panduan Cara Hitung Nilai (ramah tema gelap & terang) */}
+            <div className="rounded-2xl bg-semantic-info-soft border border-line px-4 py-3 flex items-start sm:items-center gap-3">
               <Info
-                className="size-[18px] text-semantic-info shrink-0 mt-0.5 sm:mt-0"
+                className="size-4 text-semantic-info shrink-0 mt-0.5 sm:mt-0"
                 aria-hidden="true"
               />
-              <p className="font-sans font-semibold text-[13px] leading-[18px] text-semantic-info">
-                Aturan Skor Integritas (Skala 0–100 · Awal Mitra: 80): Tuntas
-                tepat waktu +2 · Melewati tenggat -3 (-6 jika ≥10 dukungan) ·
-                Eskalasi Pengawasan -5 · Tutup Otomatis 72j = 0 (netral).
+              <p className="font-sans text-xs sm:text-sm leading-5 text-fg">
+                <strong className="text-semantic-info">Cara hitung nilai (0–100):</strong>{" "}
+                Setiap dinas mulai dari nilai <strong>80</strong> · Selesai tepat
+                waktu <strong>+2</strong> · Lewat batas waktu{" "}
+                <strong>-3</strong> (<strong>-6</strong> bila didukung &ge;10
+                warga) · Dibantah sampai pengawasan <strong>-5</strong> · Tutup
+                otomatis 72 jam <strong>+0</strong>.
               </p>
             </div>
           </section>
 
-          {/* SECTION B: 4 Kartu Statistik (StatCard) */}
-          <section
-            aria-label="Ringkasan statistik rapor"
-            className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
-          >
-            {RAPOR_KPI_STATS.map((stat) => (
-              <Card
-                key={stat.id}
-                density="none"
-                className="px-5 py-4 flex flex-col gap-1"
-              >
-                <span className="font-sans text-xs leading-4 text-fg-muted">
-                  {stat.label}
-                </span>
-                <span
-                  className={[
-                    "font-mono font-bold text-[28px] leading-[34px] tabular-nums",
-                    STAT_TONE_CLASSES[stat.valueTone] || "text-fg",
-                  ].join(" ")}
-                >
-                  {stat.value}
-                </span>
-                <span className="font-sans text-xs leading-4 text-fg-muted">
-                  {stat.meta}
-                </span>
-              </Card>
-            ))}
-          </section>
-
-          {/* SECTION C: 4 Kartu Skor Dinas (DinasScoreCard) */}
-          <section
-            aria-label="Skor integritas 4 instansi mitra"
-            className="flex flex-col gap-3"
-          >
-            <h2 className="font-head font-semibold text-xl md:text-2xl leading-[30px] text-fg">
-              Skor Integritas 4 Instansi Mitra
-            </h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              {RAPOR_DINAS_SCORES.map((dinas) => {
-                const isMidScore = dinas.score < 70 && dinas.score >= 40;
-                const isLowScore = dinas.score < 40;
-                const showOosWarn = dinas.outOfScopePct > 25;
-                const showSpamWarn = dinas.rejectedSpamPct > 20;
-                const hasWarnings =
-                  showOosWarn || showSpamWarn || dinas.isChronicOverdue;
-
-                return (
-                  <Card
-                    key={dinas.id}
-                    density="none"
-                    className={[
-                      "p-[18px] flex flex-col justify-between gap-3",
-                      isMidScore ? "!border-amber-200" : "",
-                      isLowScore ? "!border-red-300" : "",
-                    ].join(" ")}
-                  >
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start justify-between gap-2.5">
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <h3 className="font-head font-semibold text-[15px] leading-5 text-fg">
-                            {dinas.name}
-                          </h3>
-                          <p className="font-sans text-xs leading-4 text-fg-muted">
-                            {dinas.scope}
-                          </p>
-                        </div>
-
-                        <span
-                          className={[
-                            "inline-flex items-center justify-center rounded-xl border px-2.5 py-1.5",
-                            "font-mono font-bold text-[22px] leading-[26px] tabular-nums shrink-0",
-                            isLowScore
-                              ? "bg-red-50 border-red-200 text-red-700"
-                              : isMidScore
-                                ? "bg-amber-50 border-amber-200 text-amber-700"
-                                : "bg-green-50 border-green-200 text-green-700",
-                          ].join(" ")}
-                        >
-                          {dinas.score}
-                        </span>
-                      </div>
-
-                      {/* Progress Bar */}
-                      <div
-                        role="progressbar"
-                        aria-label={`Skor integritas ${dinas.name}`}
-                        aria-valuenow={dinas.score}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        className="h-2 w-full rounded-full bg-surface-2 overflow-hidden"
-                      >
-                        <div
-                          className={[
-                            "h-full rounded-full transition-all duration-300",
-                            isLowScore
-                              ? "bg-red-600"
-                              : isMidScore
-                                ? "bg-amber-600"
-                                : "bg-green-600",
-                          ].join(" ")}
-                          style={{ width: `${dinas.score}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Warning / Clean Badges */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {!hasWarnings && (
-                        <Badge
-                          variant="brand"
-                          size="sm"
-                          icon={<ShieldCheck className="size-3" />}
-                        >
-                          Rasio Sehat · Tidak Ada Peringatan
-                        </Badge>
-                      )}
-
-                      {showSpamWarn && (
-                        <Badge
-                          variant="warning"
-                          size="sm"
-                          icon={<AlertTriangle className="size-3" />}
-                          className="!bg-amber-100 !text-amber-800 !border-amber-200 font-mono text-[10px]"
-                        >
-                          REJECTED_SPAM &gt;20% ({dinas.rejectedSpamPct}%)
-                        </Badge>
-                      )}
-
-                      {showOosWarn && (
-                        <Badge
-                          variant="warning"
-                          size="sm"
-                          icon={<AlertTriangle className="size-3" />}
-                          className="!bg-amber-100 !text-amber-800 !border-amber-200 font-mono text-[10px]"
-                        >
-                          OUT_OF_SCOPE &gt;25% ({dinas.outOfScopePct}%)
-                        </Badge>
-                      )}
-
-                      {dinas.isChronicOverdue && (
-                        <Badge
-                          variant="error"
-                          size="sm"
-                          icon={<Siren className="size-3" />}
-                          className="!bg-red-100 !text-red-800 !border-red-200 font-mono text-[10px]"
-                        >
-                          isChronicOverdue
-                        </Badge>
-                      )}
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* SECTION D: Tabel Matriks Perbandingan (6 Kolom) */}
-          <section
-            aria-label="Matriks perbandingan kinerja 4 instansi"
-            className="flex flex-col gap-3"
-          >
-            <h2 className="font-head font-semibold text-xl md:text-2xl leading-[30px] text-fg">
-              Matriks Perbandingan Kinerja 4 Instansi
-            </h2>
-
-            {/* Desktop 6-Column Table */}
-            <Card density="none" className="hidden md:block overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-left">
-                  <thead>
-                    <tr className="bg-surface-2 border-b border-line">
-                      <th className="py-3 pl-5 pr-4 font-mono font-bold text-[11px] leading-4 text-fg-muted">
-                        INSTANSI &amp; SKOR
-                      </th>
-                      <th className="py-3 px-4 w-[150px] font-mono font-bold text-[11px] leading-4 text-fg-muted">
-                        KEPATUHAN SLA
-                      </th>
-                      <th className="py-3 px-4 w-[180px] font-mono font-bold text-[11px] leading-4 text-fg-muted">
-                        OVERDUE / ESCALATED
-                      </th>
-                      <th className="py-3 px-4 w-[140px] font-mono font-bold text-[11px] leading-4 text-fg-muted">
-                        KRONIS
-                      </th>
-                      <th className="py-3 px-4 w-[165px] font-mono font-bold text-[11px] leading-4 text-fg-muted">
-                        OUT OF SCOPE %
-                      </th>
-                      <th className="py-3 pl-4 pr-5 w-[165px] font-mono font-bold text-[11px] leading-4 text-fg-muted">
-                        REJECTED SPAM %
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line">
-                    {RAPOR_DINAS_SCORES.map((row, idx) => {
-                      const oosWarn = row.outOfScopePct > 25;
-                      const spamWarn = row.rejectedSpamPct > 20;
-                      return (
-                        <tr
-                          key={row.id}
-                          className={
-                            idx % 2 === 1 ? "bg-bg/60" : "bg-surface"
-                          }
-                        >
-                          <td className="py-3 pl-5 pr-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="font-head font-semibold text-sm leading-5 text-fg">
-                                {row.fullName}
-                              </span>
-                              <span
-                                className={[
-                                  "font-mono font-bold text-[13px] leading-[18px] tabular-nums shrink-0",
-                                  row.score >= 70
-                                    ? "text-green-700"
-                                    : "text-amber-700",
-                                ].join(" ")}
-                              >
-                                {row.score} / 100
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 font-mono font-medium text-[13px] text-fg tabular-nums">
-                            {row.slaCompliance}
-                          </td>
-                          <td className="py-3 px-4 font-mono font-medium text-[13px] text-fg tabular-nums">
-                            {row.overdueEscalated}
-                          </td>
-                          <td className="py-3 px-4">
-                            {row.isChronicOverdue ? (
-                              <Badge
-                                variant="error"
-                                size="sm"
-                                icon={null}
-                                className="!bg-red-100 !text-red-800 !border-red-200 font-mono"
-                              >
-                                Ya (Kronis)
-                              </Badge>
-                            ) : (
-                              <span className="font-mono font-medium text-[13px] text-fg-muted">
-                                Tidak
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            {oosWarn ? (
-                              <Badge
-                                variant="warning"
-                                size="sm"
-                                icon={null}
-                                className="!bg-amber-100 !text-amber-800 !border-amber-200 font-mono"
-                              >
-                                {row.outOfScopePct.toFixed(1)}%
-                              </Badge>
-                            ) : (
-                              <span className="font-mono font-medium text-[13px] text-fg tabular-nums">
-                                {row.outOfScopePct.toFixed(1)}%
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 pl-4 pr-5">
-                            {spamWarn ? (
-                              <Badge
-                                variant="warning"
-                                size="sm"
-                                icon={null}
-                                className="!bg-amber-100 !text-amber-800 !border-amber-200 font-mono"
-                              >
-                                {row.rejectedSpamPct.toFixed(1)}%
-                              </Badge>
-                            ) : (
-                              <span className="font-mono font-medium text-[13px] text-fg tabular-nums">
-                                {row.rejectedSpamPct.toFixed(1)}%
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+          {/* Error State */}
+          {errorMsg && (
+            <Card className="border-red-400/50 bg-semantic-error-soft flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 text-sm text-semantic-error">
+                <AlertTriangle className="size-5 shrink-0 mt-0.5" aria-hidden="true" />
+                <div>
+                  <p className="font-semibold">Gagal memuat Catatan Kerja Dinas</p>
+                  <p className="text-xs opacity-90">{errorMsg}</p>
+                </div>
               </div>
+              <Button variant="secondary" size="sm" onClick={fetchRapor}>
+                Coba Lagi
+              </Button>
             </Card>
+          )}
 
-            {/* Mobile Matrix Stack (<md) */}
-            <div className="flex flex-col gap-2.5 md:hidden">
-              {RAPOR_DINAS_SCORES.map((row) => (
-                <Card key={row.id} density="dinas" className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-head font-semibold text-sm text-fg">
-                      {row.fullName}
-                    </span>
-                    <span
-                      className={[
-                        "font-mono font-bold text-sm tabular-nums",
-                        row.score >= 70 ? "text-green-700" : "text-amber-700",
-                      ].join(" ")}
-                    >
-                      {row.score} / 100
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs pt-1.5 border-t border-line font-mono">
-                    <div>
-                      <span className="text-fg-muted block font-sans">SLA Tepat</span>
-                      <span className="font-semibold text-fg">{row.slaCompliance}</span>
-                    </div>
-                    <div>
-                      <span className="text-fg-muted block font-sans">Overdue/Esc</span>
-                      <span className="font-semibold text-fg">{row.overdueEscalated}</span>
-                    </div>
-                    <div>
-                      <span className="text-fg-muted block font-sans">Out of Scope</span>
-                      <span className={row.outOfScopePct > 25 ? "font-bold text-amber-800" : "text-fg"}>
-                        {row.outOfScopePct.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-fg-muted block font-sans">Rejected Spam</span>
-                      <span className={row.rejectedSpamPct > 20 ? "font-bold text-amber-800" : "text-fg"}>
-                        {row.rejectedSpamPct.toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
+          {/* Loading Skeleton */}
+          {loading && !data ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <Card key={idx} className="space-y-3">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-8 w-20" />
+                  <Skeleton className="h-2 w-full" />
+                  <Skeleton className="h-4 w-40" />
                 </Card>
               ))}
             </div>
-          </section>
-
-          {/* SECTION E: Peta Klaster Rawan & Kondisi Filter Kosong */}
-          <section
-            aria-label="Peta klaster rawan Sidoarjo dan Surabaya"
-            className="flex flex-col gap-3"
-          >
-            <h2 className="font-head font-semibold text-xl md:text-2xl leading-[30px] text-fg">
-              Peta Klaster Rawan Sidoarjo–Surabaya &amp; Kondisi Filter Kosong
-            </h2>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* Heatmap & Clusters (8 cols) */}
-              <div className="lg:col-span-8 relative h-[320px] sm:h-[360px] rounded-2xl border border-line bg-[#EDF2EA] overflow-hidden">
-                <svg
-                  viewBox="0 0 960 360"
-                  preserveAspectRatio="none"
-                  className="absolute inset-0 size-full pointer-events-none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M490 -30 L560 390"
-                    stroke="#CFE4F5"
-                    strokeWidth="36"
-                    fill="none"
-                  />
-                  <line
-                    x1="-10"
-                    y1="200"
-                    x2="970"
-                    y2="175"
-                    stroke="#FFFFFF"
-                    strokeWidth="10"
-                  />
-                  {filteredClusters.length > 0 && (
-                    <>
-                      <circle cx="455" cy="205" r="75" fill="#DC2626" fillOpacity="0.26" />
-                      <circle cx="455" cy="205" r="48" fill="#FACC15" fillOpacity="0.35" />
-                      <circle cx="705" cy="155" r="65" fill="#DC2626" fillOpacity="0.22" />
-                      <circle cx="245" cy="135" r="60" fill="#14B8A6" fillOpacity="0.26" />
-                      <circle cx="595" cy="260" r="55" fill="#FACC15" fillOpacity="0.30" />
-                    </>
-                  )}
-                </svg>
-
-                {filteredClusters.map((cluster) => (
-                  <div
-                    key={cluster.id}
-                    title={`${cluster.label}: ${cluster.count} titik laporan`}
-                    style={{
-                      left: `${cluster.mapX}%`,
-                      top: `${cluster.mapY}%`,
-                      width: `${cluster.sizePx}px`,
-                      height: `${cluster.sizePx}px`,
-                    }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand text-brand-fg border-[3px] border-surface shadow-elevated flex items-center justify-center font-mono font-bold text-sm"
-                  >
-                    {cluster.count}
-                  </div>
-                ))}
-
-                {/* Floating Heatmap Gradient Legend */}
-                <div className="absolute bottom-4 left-4 inline-flex items-center gap-2.5 rounded-xl bg-surface/95 border border-line px-3 py-2 shadow-card">
-                  <span className="font-mono font-medium text-[10px] text-fg-muted">
-                    Rendah
-                  </span>
-                  <span
-                    className="h-2.5 w-[100px] sm:w-[120px] rounded-full"
-                    style={{
-                      background:
-                        "linear-gradient(90deg, #14B8A6 0%, #FACC15 50%, #DC2626 100%)",
-                    }}
-                    aria-hidden="true"
-                  />
-                  <span className="font-mono font-bold text-[10px] text-semantic-error">
-                    Rawan Tinggi
-                  </span>
-                </div>
-              </div>
-
-              {/* Empty Filter State Card with Mascot Pose Siaga (4 cols) */}
-              <Card
-                density="none"
-                className="lg:col-span-4 p-6 flex flex-col items-center justify-center text-center gap-3.5 min-h-[320px] sm:min-h-[360px]"
+          ) : (
+            <>
+              {/* Ringkasan 4 Angka Utama (Data Asli DB) */}
+              <section
+                aria-label="Ringkasan angka catatan kerja"
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
               >
-                <span className="font-mono font-bold text-[10px] leading-[14px] text-fg-muted tracking-wider">
-                  {filteredClusters.length === 0
-                    ? "HASIL FILTER KOSONG"
-                    : "STATE FILTER KOSONG"}
-                </span>
+                <Card density="none" className="px-5 py-4 flex flex-col gap-1">
+                  <span className="font-sans text-xs text-fg-muted">
+                    Total Laporan Tercatat
+                  </span>
+                  <span className="font-mono font-bold text-[28px] leading-[34px] text-fg tabular-nums">
+                    {summary.totalTickets}
+                  </span>
+                  <span className="font-sans text-xs text-fg-muted">
+                    {summary.totalResolved} laporan selesai diverifikasi
+                  </span>
+                </Card>
 
-                {/* Mascot Cak Pantau — Pose Siaga */}
-                <svg
-                  viewBox="0 0 96 96"
-                  className="size-24 shrink-0"
-                  aria-hidden="true"
-                >
-                  <circle
-                    cx="48"
-                    cy="48"
-                    r="44"
-                    fill="#FEF3E2"
-                    stroke="#E7DFD3"
-                    strokeWidth="2"
-                  />
-                  <path
-                    d="M26 76c0-12 10-20 22-20s22 8 22 20"
-                    fill="#0F766E"
-                  />
-                  <circle
-                    cx="48"
-                    cy="40"
-                    r="16"
-                    fill="#FDE68A"
-                    stroke="#1C1917"
-                    strokeWidth="2"
-                  />
-                  <path
-                    d="M31 36c2-11 10-16 17-16s15 5 17 16H31z"
-                    fill="#0F766E"
-                    stroke="#1C1917"
-                    strokeWidth="2"
-                  />
-                  <rect
-                    x="42"
-                    y="24"
-                    width="12"
-                    height="5"
-                    rx="2"
-                    fill="#CCFBF1"
-                  />
-                  <circle cx="42" cy="41" r="2.2" fill="#1C1917" />
-                  <circle cx="54" cy="41" r="2.2" fill="#1C1917" />
-                  <path
-                    d="M43 48h10"
-                    stroke="#1C1917"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                  <circle cx="72" cy="28" r="10" fill="#DC2626" />
-                  <path
-                    d="M72 23v5M72 31h.01"
-                    stroke="#FFFFFF"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
+                <Card density="none" className="px-5 py-4 flex flex-col gap-1">
+                  <span className="font-sans text-xs text-fg-muted">
+                    Rata-Rata Nilai 4 Dinas
+                  </span>
+                  <span className="font-mono font-bold text-[28px] leading-[34px] text-brand tabular-nums">
+                    {summary.avgScore} / 100
+                  </span>
+                  <span className="font-sans text-xs text-fg-muted">
+                    Predikat rata-rata: {getScoreVerdict(summary.avgScore)}
+                  </span>
+                </Card>
 
-                <div className="flex flex-col gap-1.5">
-                  <h3 className="font-head font-semibold text-base leading-[22px] text-fg">
-                    Belum ada titik kerusakan di kategori ini
-                  </h3>
-                  <p className="font-sans text-sm leading-5 text-fg-muted">
-                    Coba ubah filter wilayah atau atur ulang filter kategori
-                    untuk melihat seluruh sebaran laporan aktif.
-                  </p>
+                <Card density="none" className="px-5 py-4 flex flex-col gap-1">
+                  <span className="font-sans text-xs text-fg-muted">
+                    Selesai Tepat Waktu
+                  </span>
+                  <span className="font-mono font-bold text-[28px] leading-[34px] text-semantic-success tabular-nums">
+                    {summary.onTimePct}%
+                  </span>
+                  <span className="font-sans text-xs text-fg-muted">
+                    {summary.totalOnTime} dari {summary.totalResolved} laporan tuntas
+                  </span>
+                </Card>
+
+                <Card density="none" className="px-5 py-4 flex flex-col gap-1">
+                  <span className="font-sans text-xs text-fg-muted">
+                    Terlambat &amp; Pengawasan
+                  </span>
+                  <span className="font-mono font-bold text-[28px] leading-[34px] text-semantic-error tabular-nums">
+                    {summary.totalOverdue + summary.totalEscalated}
+                  </span>
+                  <span className="font-sans text-xs text-fg-muted">
+                    {summary.totalOverdue} lewat waktu · {summary.totalEscalated} pengawasan
+                  </span>
+                </Card>
+              </section>
+
+              {/* 4 Kartu Nilai Dinas (Data Asli DB) */}
+              <section
+                aria-label="Nilai kinerja 4 instansi mitra"
+                className="flex flex-col gap-3"
+              >
+                <h2 className="font-head font-semibold text-xl md:text-2xl text-fg">
+                  Nilai Kinerja 4 Instansi Mitra
+                </h2>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                  {departments.map((d) => {
+                    const scoreRounded = Math.round(d.integrityScore);
+                    const hasWarnings =
+                      d.outOfScopeWarning ||
+                      d.rejectedSpamWarning ||
+                      d.isChronicWarning;
+                    const oosPct = Math.round(d.outOfScopeRatio * 1000) / 10;
+                    const spamPct = Math.round(d.rejectedSpamRatio * 1000) / 10;
+
+                    return (
+                      <Card
+                        key={d.id}
+                        density="none"
+                        className={[
+                          "p-[18px] flex flex-col justify-between gap-3.5",
+                          scoreRounded < 70 ? "border-amber-500/50" : "",
+                          scoreRounded < 40 ? "border-red-500/60" : "",
+                        ].join(" ")}
+                      >
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h3 className="font-head font-semibold text-base text-fg truncate">
+                                {d.name}
+                              </h3>
+                              <p className="font-sans text-xs text-fg-muted mt-0.5">
+                                {DEPT_SCOPE_HINTS[d.id] || d.shortName}
+                              </p>
+                            </div>
+                            <span
+                              className={[
+                                "inline-flex items-center justify-center rounded-xl border px-2.5 py-1",
+                                "font-mono font-bold text-lg tabular-nums shrink-0",
+                                getScoreBadgeClasses(scoreRounded),
+                              ].join(" ")}
+                            >
+                              {scoreRounded}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-fg-muted">
+                                {getScoreVerdict(scoreRounded)}
+                              </span>
+                              <span className="font-mono text-fg-muted tabular-nums">
+                                {d.totalTickets} laporan
+                              </span>
+                            </div>
+                            <div
+                              role="progressbar"
+                              aria-label={`Nilai kinerja ${d.name}`}
+                              aria-valuenow={scoreRounded}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              className="h-2 w-full rounded-full bg-surface-2 overflow-hidden"
+                            >
+                              <div
+                                className={`h-full rounded-full transition-all duration-300 ${getScoreBarClasses(scoreRounded)}`}
+                                style={{
+                                  width: `${Math.max(0, Math.min(100, scoreRounded))}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-line">
+                            <div>
+                              <span className="text-fg-muted block">Tepat waktu</span>
+                              <strong className="font-mono text-fg tabular-nums">
+                                {Math.round(d.slaOnTimeRatio * 100)}% ({d.onTimeResolved}/{d.totalResolved})
+                              </strong>
+                            </div>
+                            <div>
+                              <span className="text-fg-muted block">Lewat waktu</span>
+                              <strong className="font-mono text-fg tabular-nums">
+                                {d.overdueCount} kali
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {!hasWarnings && (
+                            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-semantic-success-soft text-semantic-success">
+                              <ShieldCheck className="size-3.5 shrink-0" aria-hidden="true" />
+                              Kerja Normal · Tanpa Peringatan
+                            </span>
+                          )}
+                          {d.outOfScopeWarning && (
+                            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-semantic-warning-soft text-semantic-warning">
+                              <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+                              Sering Lempar Laporan ({oosPct}%)
+                            </span>
+                          )}
+                          {d.rejectedSpamWarning && (
+                            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-semantic-warning-soft text-semantic-warning">
+                              <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+                              Sering Tolak Laporan ({spamPct}%)
+                            </span>
+                          )}
+                          {d.isChronicWarning && (
+                            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-semantic-error-soft text-semantic-error">
+                              <Siren className="size-3.5 shrink-0" aria-hidden="true" />
+                              Keterlambatan Parah ({d.chronicOverdueCnt})
+                            </span>
+                          )}
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* Tabel Perbandingan Kinerja 4 Instansi */}
+              <section
+                aria-label="Tabel perbandingan kinerja 4 instansi"
+                className="flex flex-col gap-3"
+              >
+                <h2 className="font-head font-semibold text-xl md:text-2xl text-fg">
+                  Perbandingan Lengkap 4 Instansi
+                </h2>
+
+                <Card density="none" className="overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-left text-sm">
+                      <thead>
+                        <tr className="bg-surface-2 border-b border-line text-xs font-mono uppercase text-fg-muted">
+                          <th className="py-3 px-4">Instansi</th>
+                          <th className="py-3 px-4">Nilai Kerja</th>
+                          <th className="py-3 px-4">Tepat Waktu</th>
+                          <th className="py-3 px-4">Terlambat</th>
+                          <th className="py-3 px-4">Lempar Instansi Lain</th>
+                          <th className="py-3 px-4">Tolak Spam</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line">
+                        {departments.map((d) => {
+                          const scoreRounded = Math.round(d.integrityScore);
+                          const oosPct = Math.round(d.outOfScopeRatio * 1000) / 10;
+                          const spamPct = Math.round(d.rejectedSpamRatio * 1000) / 10;
+                          return (
+                            <tr
+                              key={d.id}
+                              className="hover:bg-surface-2/50 transition-colors"
+                            >
+                              <td className="py-3 px-4 font-head font-semibold text-fg">
+                                {d.name}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={[
+                                    "inline-flex items-center rounded-lg border px-2 py-0.5 font-mono font-bold text-xs tabular-nums",
+                                    getScoreBadgeClasses(scoreRounded),
+                                  ].join(" ")}
+                                >
+                                  {scoreRounded} / 100
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-mono text-fg tabular-nums">
+                                {Math.round(d.slaOnTimeRatio * 100)}% ({d.onTimeResolved}/{d.totalResolved})
+                              </td>
+                              <td className="py-3 px-4 font-mono tabular-nums">
+                                <span className={d.overdueCount > 0 ? "text-semantic-error font-semibold" : "text-fg-muted"}>
+                                  {d.overdueCount}
+                                </span>
+                                {d.isChronicWarning && (
+                                  <span className="ml-1.5 text-[11px] text-semantic-error">
+                                    ({d.chronicOverdueCnt} parah)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 font-mono tabular-nums">
+                                <span className={d.outOfScopeWarning ? "text-semantic-warning font-bold" : "text-fg-muted"}>
+                                  {oosPct}% ({d.outOfScopeCount})
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-mono tabular-nums">
+                                <span className={d.rejectedSpamWarning ? "text-semantic-warning font-bold" : "text-fg-muted"}>
+                                  {spamPct}% ({d.rejectedSpamCount})
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </section>
+
+              {/* Peta Titik Rawan Kerusakan (Titik Asli dari clusterPoints DB) */}
+              <section
+                aria-label="Sebaran titik kerusakan Surabaya dan Sidoarjo"
+                className="flex flex-col gap-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="font-head font-semibold text-xl md:text-2xl text-fg">
+                      Sebaran Titik Kerusakan Surabaya–Sidoarjo
+                    </h2>
+                    <p className="text-xs text-fg-muted">
+                      Menampilkan {clusterPoints.length} titik laporan nyata dari database
+                      (koordinat publik disamarkan &plusmn;11 m). Klik titik untuk membuka detail.
+                    </p>
+                  </div>
+                  {selectedCategory && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setSelectedCategory("")}
+                    >
+                      <RotateCcw className="size-4" aria-hidden="true" />
+                      Lihat Semua Kategori
+                    </Button>
+                  )}
                 </div>
 
-                <Button
-                  variant="primary"
-                  size="md"
-                  leftIcon={<RotateCcw className="size-4" />}
-                  onClick={handleResetFilters}
-                >
-                  Reset Filter Peta
-                </Button>
-              </Card>
-            </div>
-          </section>
+                {clusterPoints.length === 0 ? (
+                  <Card className="py-10 text-center flex flex-col items-center gap-3">
+                    <MapPin className="size-8 text-fg-muted" aria-hidden="true" />
+                    <p className="font-head font-semibold text-base text-fg">
+                      Belum ada titik kerusakan pada kategori ini
+                    </p>
+                    <p className="text-sm text-fg-muted max-w-md">
+                      Coba pilih kategori lain atau tampilkan semua jenis kerusakan di wilayah Surabaya dan Sidoarjo.
+                    </p>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setSelectedCategory("")}
+                    >
+                      Lihat Semua Kategori
+                    </Button>
+                  </Card>
+                ) : (
+                  <Card density="none" className="p-4">
+                    <div className="relative h-[320px] sm:h-[360px] rounded-xl border border-line bg-surface-2 overflow-hidden">
+                      {/* Grid panduan wilayah */}
+                      <div
+                        className="absolute inset-0 opacity-20 pointer-events-none"
+                        style={{
+                          backgroundImage:
+                            "radial-gradient(circle, currentColor 1px, transparent 1px)",
+                          backgroundSize: "24px 24px",
+                        }}
+                      />
+                      <span className="absolute top-3 left-3 text-[11px] font-mono font-semibold text-fg-muted bg-surface/90 border border-line px-2.5 py-1 rounded-lg">
+                        Kota Surabaya (Utara)
+                      </span>
+                      <span className="absolute bottom-3 left-3 text-[11px] font-mono font-semibold text-fg-muted bg-surface/90 border border-line px-2.5 py-1 rounded-lg">
+                        Kab. Sidoarjo (Selatan)
+                      </span>
+
+                      {clusterPoints.map((pt) => {
+                        const pos = projectPoint(pt.lat, pt.lng);
+                        const meta =
+                          TICKET_STATUSES[pt.status as keyof typeof TICKET_STATUSES];
+                        const pinHex = meta?.pinHex || "#2563EB";
+                        return (
+                          <button
+                            key={pt.id}
+                            type="button"
+                            onClick={() => navigate(`/tiket/${pt.id}`)}
+                            title={`${meta?.label || pt.status} (${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)})`}
+                            style={{
+                              left: pos.left,
+                              top: pos.top,
+                              backgroundColor: pinHex,
+                            }}
+                            className="absolute -translate-x-1/2 -translate-y-1/2 size-4 rounded-full border-2 border-surface shadow-sm hover:scale-125 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            aria-label={`Buka laporan ${pt.id} status ${meta?.label || pt.status}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  </Card>
+                )}
+              </section>
+            </>
+          )}
         </main>
       </div>
     </div>
