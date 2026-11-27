@@ -153,7 +153,7 @@ export const HUMAN_ERRORS = {
   JURY_REAL_DATA_BLOCKED:
     "Mode simulasi juri hanya boleh mengubah data contoh, bukan laporan asli warga.",
   OUT_OF_SERVICE_AREA:
-    "Lokasi pin berada di luar wilayah layanan Surabaya & Sidoarjo. Geser pin ke dalam garis batas peta.",
+    "Lokasi GPS berada di luar wilayah layanan Surabaya & Sidoarjo. Pastikan kamu berada di lokasi kejadian (atau gunakan Simulator GPS di Panel Juri).",
   QUOTA_RADIUS_FULL:
     "Titik sekitar sudah memiliki laporan aktif serupa. Yuk klik Dukung Prioritas agar penanganannya lebih cepat!",
   QUOTA_ACCOUNT_ACTIVE:

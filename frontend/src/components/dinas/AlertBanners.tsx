@@ -65,7 +65,7 @@ export function AlertBanners({
               size="sm"
               onClick={() => onProcessRework?.(disputedTicket.id)}
             >
-              Proses Ulang
+              Proses Perbaikan Ulang
             </Button>
             <Button
               variant="secondary"
@@ -99,8 +99,8 @@ export function AlertBanners({
           <p className="font-sans text-sm leading-5 text-fg">
             {escalatedTicket.displayCode} · {escalatedTicket.categoryTitle} —{" "}
             {escalatedTicket.location}. Bantahan putaran ke-2 sah. Tombol Selesai
-            terkunci hingga Berita Acara (PDF/JPG ≤5 MB) dan Foto Live (≤75 m)
-            diunggah.
+            terkunci hingga Berita Acara (PDF/JPG/PNG &le;5 MB) dan Foto Live
+            (&le;75 m) diunggah.
           </p>
 
           <div className="flex flex-wrap items-center gap-2 pt-0.5">

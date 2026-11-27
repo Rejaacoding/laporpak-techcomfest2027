@@ -18,6 +18,7 @@ import {
   validateTicketBodySchema,
 } from "../shared/schemas.js";
 import crypto from "node:crypto";
+import { DEPARTMENTS } from "../shared/constants.js";
 import { prisma } from "../lib/prisma.js";
 import { redis } from "../lib/redis.js";
 import { AppError, okResponse } from "../lib/errors.js";
@@ -65,17 +66,26 @@ export async function healthController(_req, res, next) {
 export async function authMeController(req, res, next) {
   try {
     const user = req.user;
-    const [activeTicketCount, dept] = await Promise.all([
-      prisma.ticket.count({
-        where: {
-          reporterId: user.id,
-          status: { notIn: ["CLOSED", "AUTO_CLOSED", "OUT_OF_SCOPE", "REJECTED_SPAM"] },
-        },
-      }),
-      user.departmentId
-        ? prisma.department.findUnique({ where: { id: user.departmentId }, select: { name: true, shortName: true } })
-        : null,
-    ]);
+    const isAdminDinas = user.role === "ADMIN_DINAS";
+    const staticDept = user.departmentId ? DEPARTMENTS[user.departmentId] : null;
+
+    const [activeTicketCount, dept] = isAdminDinas
+      ? [0, staticDept]
+      : await Promise.all([
+          prisma.ticket.count({
+            where: {
+              reporterId: user.id,
+              status: { notIn: ["CLOSED", "AUTO_CLOSED", "OUT_OF_SCOPE", "REJECTED_SPAM"] },
+            },
+          }),
+          user.departmentId
+            ? staticDept ||
+              prisma.department.findUnique({
+                where: { id: user.departmentId },
+                select: { name: true, shortName: true },
+              })
+            : null,
+        ]);
 
     return okResponse(res, {
       aliasName: user.aliasName,

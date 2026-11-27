@@ -129,5 +129,6 @@ export async function invalidatePublicCaches() {
   await Promise.allSettled([
     redis.deleteByPrefix("cache:tickets:"),
     redis.deleteByPrefix("cache:rapor:"),
+    redis.deleteByPrefix("cache:dinas:"),
   ]);
 }

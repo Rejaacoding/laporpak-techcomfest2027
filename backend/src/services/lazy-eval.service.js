@@ -273,9 +273,10 @@ export async function evaluateTicketLazy(ticketId) {
     if (changed) mutated = true;
   }
 
-  if (mutated) {
-    await invalidatePublicCaches();
+  if (!mutated) {
+    return ticket;
   }
+  await invalidatePublicCaches();
   return prisma.ticket.findUnique({ where: { id: ticketId } });
 }
 

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import {
   BrowserRouter,
-  Link,
   Navigate,
   Route,
   Routes,
@@ -14,7 +13,7 @@ import {
 } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.tsx";
 import { CitizenOnly, RequireAuth } from "./components/auth/index.ts";
-import { Button, ToastProvider } from "./components/ui/index.js";
+import { ToastProvider } from "./components/ui/index.js";
 import LoginPage from "./pages/auth/LoginPage.tsx";
 import DinasDashboardPage from "./pages/dinas/DashboardPage.tsx";
 import DinasPetaPage from "./pages/dinas/PetaPage.tsx";
@@ -37,78 +36,6 @@ function RouteThemeSync() {
   return null;
 }
 
-function TopNav() {
-  const { pathname } = useLocation();
-  const { user, signOut } = useAuth();
-
-  if (
-    pathname === "/" ||
-    pathname.startsWith("/peta") ||
-    pathname.startsWith("/lapor") ||
-    pathname.startsWith("/tiket") ||
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/dinas") ||
-    pathname.startsWith("/catatan") ||
-    pathname.startsWith("/rapor")
-  ) {
-    return null;
-  }
-
-  return (
-    <header className="h-16 bg-surface border-b border-line px-4 md:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto h-full flex items-center justify-between gap-4">
-        <Link
-          to="/"
-          className="font-head font-bold text-lg text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg px-1"
-        >
-          LaporPAK!
-        </Link>
-
-        <nav className="flex items-center gap-3 text-sm font-medium">
-          <Link to="/" className="text-fg hover:text-brand">
-            Peta
-          </Link>
-          <Link to="/catatan" className="text-fg hover:text-brand">
-            Catatan
-          </Link>
-          <CitizenOnly>
-            <Link to="/lapor" className="text-brand font-semibold">
-              Lapor Kerusakan
-            </Link>
-          </CitizenOnly>
-          {user?.role === "ADMIN_DINAS" && (
-            <Link to="/dinas" className="text-brand font-semibold">
-              Meja Dinas
-            </Link>
-          )}
-        </nav>
-
-        <div className="flex items-center gap-2">
-          {user ? (
-            <>
-              <CitizenOnly>
-                <span className="text-xs font-mono text-fg-muted hidden sm:inline">
-                  {user.aliasName}
-                </span>
-              </CitizenOnly>
-              <Button variant="secondary" density="dinas" onClick={signOut}>
-                Keluar
-              </Button>
-            </>
-          ) : (
-            <Link
-              to="/login"
-              className="inline-flex items-center justify-center rounded-xl bg-brand text-brand-fg px-4 min-h-9 text-sm font-semibold hover:brightness-110"
-            >
-              Masuk
-            </Link>
-          )}
-        </div>
-      </div>
-    </header>
-  );
-}
-
 function JuryPanelBridge() {
   const { switchJuryRole } = useAuth();
   return <JuryPanel onRoleChange={switchJuryRole} />;
@@ -121,7 +48,6 @@ export default function App() {
         <ToastProvider>
           <AuthProvider>
             <RouteThemeSync />
-            <TopNav />
             <Routes>
               <Route path="/" element={<WargaBerandaPage />} />
               <Route path="/peta" element={<WargaPetaPage />} />

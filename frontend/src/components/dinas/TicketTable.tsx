@@ -1,4 +1,5 @@
-import { Clock, MapPin, ThumbsUp } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, Clock, MapPin, ThumbsUp } from "lucide-react";
 import { Badge, Button, Card } from "../ui/index.js";
 import type { DinasQueueCounts, DinasQueueFilterKey } from "../layout/DinasSidebar.tsx";
 import type {
@@ -10,10 +11,19 @@ export interface TicketTableProps {
   tickets: DinasTicketViewRow[];
   activeTab: DinasQueueFilterKey;
   counts?: Partial<DinasQueueCounts>;
+  busyActionKey?: string | null;
   onTabChange: (tab: DinasQueueFilterKey) => void;
   onAction?: (ticket: DinasTicketViewRow, action: TicketActionItem) => void;
   onResetFilters?: () => void;
   className?: string;
+}
+
+function summarizeDisabledReasons(actions: TicketActionItem[]): string | null {
+  const locked = actions.filter((a) => a.disabled && a.disabledReason);
+  if (locked.length === 0) return null;
+  const uniqueReasons = [...new Set(locked.map((a) => a.disabledReason))];
+  const names = locked.map((a) => a.label).join(" / ");
+  return `${names} terkunci: ${uniqueReasons[0]}`;
 }
 
 const TABS: Array<{
@@ -23,12 +33,13 @@ const TABS: Array<{
 }> = [
   { key: "ALL", label: "Semua Antrean", countClass: "bg-brand-soft text-brand" },
   { key: "OVERDUE", label: "Melewati Tenggat", countClass: "bg-red-100 text-red-800" },
+  { key: "DISPUTED", label: "Dibantah Warga", countClass: "bg-purple-100 text-purple-800" },
+  { key: "ESCALATED", label: "Eskalasi", countClass: "bg-red-900 text-red-50" },
   {
     key: "PENDING_VALIDATION",
     label: "Menunggu Cek Warga",
     countClass: "bg-orange-100 text-orange-900",
   },
-  { key: "DISPUTED", label: "Dibantah", countClass: "bg-purple-100 text-purple-800" },
   { key: "CLOSED", label: "Tuntas Terverifikasi", countClass: "bg-green-100 text-green-800" },
 ];
 
@@ -48,6 +59,7 @@ export function TicketTable({
   tickets,
   activeTab,
   counts = {},
+  busyActionKey = null,
   onTabChange,
   onAction,
   onResetFilters,
@@ -140,6 +152,11 @@ export function TicketTable({
                 <tbody className="divide-y divide-line">
                   {tickets.map((ticket, index) => {
                     const isOverdue = ticket.status === "OVERDUE";
+                    const rowKey = ticket.id;
+                    const isRowBusy = Boolean(
+                      busyActionKey && busyActionKey.startsWith(`${rowKey}:`)
+                    );
+                    const disabledNote = summarizeDisabledReasons(ticket.actions);
                     return (
                       <tr
                         key={ticket.id}
@@ -155,9 +172,18 @@ export function TicketTable({
                         <td className="py-3 pl-5 pr-3.5 align-middle">
                           <div className="flex flex-col items-start gap-1">
                             <Badge status={ticket.status} />
-                            <span className="font-mono font-medium text-[11px] leading-[14px] text-fg-muted">
+                            <Link
+                              to={`/tiket/${rowKey}`}
+                              className="font-mono font-medium text-[11px] leading-[14px] text-brand hover:underline"
+                            >
                               {ticket.displayCode}
-                            </span>
+                            </Link>
+                            {ticket.isFastResolveAnomaly && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
+                                <AlertTriangle className="size-3 shrink-0" aria-hidden="true" />
+                                Selesai &lt;10m
+                              </span>
+                            )}
                           </div>
                         </td>
 
@@ -204,19 +230,39 @@ export function TicketTable({
                         </td>
 
                         <td className="py-3 pl-3.5 pr-5 align-middle">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {ticket.actions.map((action) => (
-                              <Button
-                                key={action.id}
-                                variant={action.variant}
-                                size="sm"
-                                disabled={action.disabled}
-                                title={action.disabledReason}
-                                onClick={() => onAction?.(ticket, action)}
-                              >
-                                {action.label}
-                              </Button>
-                            ))}
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {ticket.actions.length === 0 ? (
+                                <span className="text-xs text-fg-muted">
+                                  Tidak ada aksi lanjutan
+                                </span>
+                              ) : (
+                                ticket.actions.map((action) => {
+                                  const isActionLoading =
+                                    busyActionKey === `${rowKey}:${action.id}`;
+                                  return (
+                                    <Button
+                                      key={action.id}
+                                      variant={action.variant}
+                                      size="sm"
+                                      loading={isActionLoading}
+                                      disabled={action.disabled || isRowBusy}
+                                      title={action.disabledReason}
+                                      onClick={() => onAction?.(ticket, action)}
+                                    >
+                                      {isActionLoading
+                                        ? "Memproses..."
+                                        : action.label}
+                                    </Button>
+                                  );
+                                })
+                              )}
+                            </div>
+                            {disabledNote && (
+                              <p className="text-[11px] leading-4 text-fg-muted">
+                                {disabledNote}
+                              </p>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -230,6 +276,11 @@ export function TicketTable({
           <div className="flex flex-col gap-2.5 md:hidden">
             {tickets.map((ticket) => {
               const isOverdue = ticket.status === "OVERDUE";
+              const rowKey = ticket.id;
+              const isRowBusy = Boolean(
+                busyActionKey && busyActionKey.startsWith(`${rowKey}:`)
+              );
+              const disabledNote = summarizeDisabledReasons(ticket.actions);
               return (
                 <Card
                   key={ticket.id}
@@ -240,10 +291,21 @@ export function TicketTable({
                   ].join(" ")}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <Badge status={ticket.status} size="sm" />
-                    <span className="font-mono font-medium text-[11px] text-fg-muted">
+                    <div className="flex items-center gap-1.5">
+                      <Badge status={ticket.status} size="sm" />
+                      {ticket.isFastResolveAnomaly && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
+                          <AlertTriangle className="size-3 shrink-0" aria-hidden="true" />
+                          &lt;10m
+                        </span>
+                      )}
+                    </div>
+                    <Link
+                      to={`/tiket/${rowKey}`}
+                      className="font-mono font-medium text-[11px] text-brand hover:underline"
+                    >
                       {ticket.displayCode}
-                    </span>
+                    </Link>
                   </div>
 
                   <div className="flex flex-col gap-1">
@@ -281,19 +343,37 @@ export function TicketTable({
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {ticket.actions.map((action) => (
-                      <Button
-                        key={action.id}
-                        variant={action.variant}
-                        size="sm"
-                        disabled={action.disabled}
-                        title={action.disabledReason}
-                        onClick={() => onAction?.(ticket, action)}
-                      >
-                        {action.label}
-                      </Button>
-                    ))}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {ticket.actions.length === 0 ? (
+                        <span className="text-xs text-fg-muted">
+                          Tidak ada aksi lanjutan
+                        </span>
+                      ) : (
+                        ticket.actions.map((action) => {
+                          const isActionLoading =
+                            busyActionKey === `${rowKey}:${action.id}`;
+                          return (
+                            <Button
+                              key={action.id}
+                              variant={action.variant}
+                              size="sm"
+                              loading={isActionLoading}
+                              disabled={action.disabled || isRowBusy}
+                              title={action.disabledReason}
+                              onClick={() => onAction?.(ticket, action)}
+                            >
+                              {isActionLoading ? "Memproses..." : action.label}
+                            </Button>
+                          );
+                        })
+                      )}
+                    </div>
+                    {disabledNote && (
+                      <p className="text-[11px] leading-4 text-fg-muted">
+                        {disabledNote}
+                      </p>
+                    )}
                   </div>
                 </Card>
               );

@@ -77,6 +77,7 @@ export interface ApiDinasTicket extends ApiPublicTicket {
   validationStartedAt?: string | null;
   transferCount?: number;
   appealUsed?: boolean;
+  isFastResolveAnomaly?: boolean;
   description?: string;
   afterPhotoUrl?: string | null;
   isLowQualityOverride?: boolean;
@@ -110,6 +111,7 @@ export interface DinasTicketViewRow {
   transferCount: number;
   appealUsed: boolean;
   isChronicOverdue: boolean;
+  isFastResolveAnomaly: boolean;
   isDemoData: boolean;
   description: string;
   afterPhotoUrl: string | null;
@@ -563,6 +565,7 @@ export function mapDinasTicketsToRows(
       transferCount: Number(ticket.transferCount || 0),
       appealUsed: Boolean(ticket.appealUsed),
       isChronicOverdue: Boolean(ticket.isChronicOverdue),
+      isFastResolveAnomaly: Boolean(ticket.isFastResolveAnomaly),
       isDemoData: Boolean(ticket.isDemoData),
       description: ticket.description || "",
       afterPhotoUrl: ticket.afterPhotoUrl || null,
