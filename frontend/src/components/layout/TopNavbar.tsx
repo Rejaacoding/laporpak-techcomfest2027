@@ -25,9 +25,9 @@ export interface TopNavbarProps {
 
 const DEFAULT_NAV_ITEMS: TopNavbarNavItem[] = [
   { to: "/", label: "Peta Laporan" },
-  { to: "/lapor", label: "Lapor Kerusakan", citizenOnly: true },
-  { to: "/dinas", label: "Meja Dinas", roles: ["ADMIN_DINAS"] },
-  { to: "/rapor", label: "Catatan Kerja" },
+  { to: "/lapor", label: "Buat Laporan", citizenOnly: true },
+  { to: "/dinas", label: "Antrean Dinas", roles: ["ADMIN_DINAS"] },
+  { to: "/catatan", label: "Catatan" },
 ];
 
 /**
@@ -91,8 +91,8 @@ export function TopNavbar({
             const targetTo =
               item.to === "/" && user?.role === "ADMIN_DINAS"
                 ? "/dinas/peta"
-                : item.to === "/rapor" && user?.role === "ADMIN_DINAS"
-                  ? "/dinas/rapor"
+                : item.to === "/catatan" && user?.role === "ADMIN_DINAS"
+                  ? "/dinas/catatan"
                   : item.to;
             const active = isActiveRoute(targetTo);
             const linkEl = (

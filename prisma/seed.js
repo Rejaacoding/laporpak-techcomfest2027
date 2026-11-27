@@ -1,4 +1,4 @@
-import { prisma } from "../src/lib/prisma.js";
+import { prisma } from "../backend/src/lib/prisma.js";
 import { seedDemoData } from "./seed-core.js";
 
 async function main() {

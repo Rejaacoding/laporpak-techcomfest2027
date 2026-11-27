@@ -52,21 +52,6 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(function Card(
   );
 });
 
-export function CardHeader({
-  className = "",
-  children,
-  ...props
-}: HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={`mb-3 flex items-start justify-between gap-3 ${className}`}
-      {...props}
-    >
-      {children}
-    </div>
-  );
-}
-
 export interface CardTitleProps extends HTMLAttributes<HTMLElement> {
   as?: ElementType;
   children?: ReactNode;
@@ -95,21 +80,6 @@ export function CardContent({
 }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div className={`text-sm md:text-base text-fg ${className}`} {...props}>
-      {children}
-    </div>
-  );
-}
-
-export function CardFooter({
-  className = "",
-  children,
-  ...props
-}: HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={`mt-4 pt-3 border-t border-line flex items-center justify-between gap-3 ${className}`}
-      {...props}
-    >
       {children}
     </div>
   );

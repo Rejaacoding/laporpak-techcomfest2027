@@ -5,15 +5,15 @@ import {
   useEffect,
   useState,
 } from "react";
-import { supabase } from "../lib/supabase.ts";
-import { humanizeError } from "../lib/humanize.js";
+import { supabase } from "../services/supabase.ts";
+import { humanizeError } from "../utils/humanize.js";
 import {
   clearJurySessionState,
   getJuryHeaders,
   getJurySessionState,
   JURY_ROLE_KEY,
   JURY_TOKEN_KEY,
-} from "../lib/api.js";
+} from "../services/api.js";
 
 export type UserRole = "WARGA" | "ADMIN_DINAS";
 

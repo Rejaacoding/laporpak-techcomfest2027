@@ -2,15 +2,18 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Clock, MapPin, ThumbsUp } from "lucide-react";
 import { Badge, Button, Card } from "../ui/index.js";
 import type { DinasQueueCounts, DinasQueueFilterKey } from "../layout/DinasSidebar.tsx";
-import type { DinasTicketRow, TicketActionItem } from "../../data/mockTickets.ts";
+import type {
+  DinasTicketViewRow,
+  TicketActionItem,
+} from "../../utils/ticketMappers.ts";
 
 export interface TicketTableProps {
-  tickets: DinasTicketRow[];
+  tickets: DinasTicketViewRow[];
   activeTab: DinasQueueFilterKey;
-  onTabChange: (tab: DinasQueueFilterKey) => void;
   counts?: Partial<DinasQueueCounts>;
   busyActionKey?: string | null;
-  onAction?: (ticket: DinasTicketRow, action: TicketActionItem) => void;
+  onTabChange: (tab: DinasQueueFilterKey) => void;
+  onAction?: (ticket: DinasTicketViewRow, action: TicketActionItem) => void;
   onResetFilters?: () => void;
   className?: string;
 }
@@ -23,20 +26,24 @@ function summarizeDisabledReasons(actions: TicketActionItem[]): string | null {
   return `${names} terkunci: ${uniqueReasons[0]}`;
 }
 
-const TAB_DEFS: Array<{
+const TABS: Array<{
   key: DinasQueueFilterKey;
   label: string;
   countClass: string;
 }> = [
-  { key: "ALL", label: "Semua", countClass: "bg-brand-soft text-brand" },
+  { key: "ALL", label: "Semua Antrean", countClass: "bg-brand-soft text-brand" },
   { key: "OVERDUE", label: "Melewati Tenggat", countClass: "bg-red-100 text-red-800" },
   { key: "DISPUTED", label: "Dibantah Warga", countClass: "bg-purple-100 text-purple-800" },
   { key: "ESCALATED", label: "Eskalasi", countClass: "bg-red-900 text-red-50" },
-  { key: "PENDING_VALIDATION", label: "Menunggu Cek Warga", countClass: "bg-orange-100 text-orange-900" },
-  { key: "CLOSED", label: "Tuntas", countClass: "bg-green-100 text-green-800" },
+  {
+    key: "PENDING_VALIDATION",
+    label: "Menunggu Cek Warga",
+    countClass: "bg-orange-100 text-orange-900",
+  },
+  { key: "CLOSED", label: "Tuntas Terverifikasi", countClass: "bg-green-100 text-green-800" },
 ];
 
-const SLA_TONE_CLASSES: Record<DinasTicketRow["slaTone"], string> = {
+const SLA_TONE_CLASSES: Record<DinasTicketViewRow["slaTone"], string> = {
   overdue: "text-semantic-error",
   disputed: "text-purple-800",
   warning: "text-amber-700",
@@ -45,16 +52,15 @@ const SLA_TONE_CLASSES: Record<DinasTicketRow["slaTone"], string> = {
 };
 
 /**
- * Ticket Queue Tabs + Priority Table — matched to Figma
- * "Instance / Tabs Underline Container" & "Table / Antrean Prioritas Dinas".
- * Desktop: dense table with sticky header; Mobile: compact card stack (docs/design.md §6.9).
+ * Ticket Queue Tabs + Priority Table — live API rows and counts.
+ * Desktop: dense table; mobile: compact card stack (docs/design.md §6.9).
  */
 export function TicketTable({
   tickets,
   activeTab,
+  counts = {},
+  busyActionKey = null,
   onTabChange,
-  counts,
-  busyActionKey,
   onAction,
   onResetFilters,
   className = "",
@@ -64,13 +70,12 @@ export function TicketTable({
       aria-label="Daftar antrean tiket prioritas dinas"
       className={["flex flex-col gap-5", className].join(" ")}
     >
-      {/* Underline Status Filter Tabs */}
       <div
         role="tablist"
         aria-label="Filter status antrean"
         className="flex items-center gap-7 border-b border-line px-1 overflow-x-auto"
       >
-        {TAB_DEFS.map((tab) => {
+        {TABS.map((tab) => {
           const active = activeTab === tab.key;
           const count = counts?.[tab.key] ?? 0;
           return (
@@ -105,7 +110,6 @@ export function TicketTable({
         })}
       </div>
 
-      {/* Empty State */}
       {tickets.length === 0 ? (
         <Card className="text-center py-10 flex flex-col items-center gap-3">
           <p className="font-head font-semibold text-base text-fg">
@@ -123,7 +127,6 @@ export function TicketTable({
         </Card>
       ) : (
         <>
-          {/* Desktop Table (md+) */}
           <Card density="none" className="hidden md:block overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
@@ -149,7 +152,7 @@ export function TicketTable({
                 <tbody className="divide-y divide-line">
                   {tickets.map((ticket, index) => {
                     const isOverdue = ticket.status === "OVERDUE";
-                    const rowKey = ticket.ticketId || ticket.id;
+                    const rowKey = ticket.id;
                     const isRowBusy = Boolean(
                       busyActionKey && busyActionKey.startsWith(`${rowKey}:`)
                     );
@@ -166,7 +169,6 @@ export function TicketTable({
                               : "bg-surface",
                         ].join(" ")}
                       >
-                        {/* Status + Ticket ID */}
                         <td className="py-3 pl-5 pr-3.5 align-middle">
                           <div className="flex flex-col items-start gap-1">
                             <Badge status={ticket.status} />
@@ -174,7 +176,7 @@ export function TicketTable({
                               to={`/tiket/${rowKey}`}
                               className="font-mono font-medium text-[11px] leading-[14px] text-brand hover:underline"
                             >
-                              {ticket.id}
+                              {ticket.displayCode}
                             </Link>
                             {ticket.isFastResolveAnomaly && (
                               <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
@@ -185,7 +187,6 @@ export function TicketTable({
                           </div>
                         </td>
 
-                        {/* Category + Tier + Location */}
                         <td className="py-3 px-3.5 align-middle">
                           <div className="flex flex-col gap-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -206,7 +207,6 @@ export function TicketTable({
                           </div>
                         </td>
 
-                        {/* SLA Timer */}
                         <td className="py-3 px-3.5 align-middle">
                           <span
                             className={[
@@ -219,7 +219,6 @@ export function TicketTable({
                           </span>
                         </td>
 
-                        {/* Support Count */}
                         <td className="py-3 px-3.5 align-middle">
                           <span className="inline-flex items-center gap-1.5 font-mono font-bold text-[13px] leading-[18px] text-fg tabular-nums">
                             <ThumbsUp
@@ -230,7 +229,6 @@ export function TicketTable({
                           </span>
                         </td>
 
-                        {/* Dinas Actions */}
                         <td className="py-3 pl-3.5 pr-5 align-middle">
                           <div className="flex flex-col gap-1.5">
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -275,11 +273,10 @@ export function TicketTable({
             </div>
           </Card>
 
-          {/* Mobile Card Stack (<md) per docs/design.md §6.9 */}
           <div className="flex flex-col gap-2.5 md:hidden">
             {tickets.map((ticket) => {
               const isOverdue = ticket.status === "OVERDUE";
-              const rowKey = ticket.ticketId || ticket.id;
+              const rowKey = ticket.id;
               const isRowBusy = Boolean(
                 busyActionKey && busyActionKey.startsWith(`${rowKey}:`)
               );
@@ -307,7 +304,7 @@ export function TicketTable({
                       to={`/tiket/${rowKey}`}
                       className="font-mono font-medium text-[11px] text-brand hover:underline"
                     >
-                      {ticket.id}
+                      {ticket.displayCode}
                     </Link>
                   </div>
 

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { CATEGORIES, DEPARTMENTS, roundPublicCoord } from "../src/shared/constants.js";
-import { computeActorPublicRef, computeAuditHash } from "../src/lib/crypto.js";
+import { CATEGORIES, DEPARTMENTS, roundPublicCoord } from "../backend/src/shared/constants.js";
+import { computeActorPublicRef, computeAuditHash } from "../backend/src/lib/crypto.js";
 
 const DEMO_USERS = [
   { id: "demo-admin-dishub", email: "dishub@laporpak.id", aliasName: "Admin-Dishub", role: "ADMIN_DINAS", departmentId: "DISHUB", isVerifiedPartner: true, trustScore: 1.0, hasGraduatedToOne: false },

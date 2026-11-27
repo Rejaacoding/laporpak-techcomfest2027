@@ -3,9 +3,9 @@ import http from "node:http";
 
 process.env.NODE_ENV = "test";
 
-const { prisma } = await import("../src/lib/prisma.js");
-const { redis } = await import("../src/lib/redis.js");
-const { deleteStorageObjects, uploadStorageObject } = await import("../src/lib/supabase.js");
+const { prisma } = await import("../backend/src/lib/prisma.js");
+const { redis } = await import("../backend/src/lib/redis.js");
+const { deleteStorageObjects, uploadStorageObject } = await import("../backend/src/lib/supabase.js");
 const { seedDemoData } = await import("../prisma/seed-core.js");
 const { default: app } = await import("../api/index.js");
 
@@ -649,30 +649,10 @@ async function runTests() {
   const juryMitra = await req("POST", "/api/aktivasi-mitra", { headers: { "X-Jury-Token": juryToken } });
   assert.equal(juryMitra.status, 403);
 
-  // Bersihkan seluruh file uji di Supabase Storage sebelum & sesudah reset demo agar bucket cloud tetap bersih
-  const allUploaded = await prisma.ticket.findMany({
-    where: {
-      OR: [
-        { beforePhotoKey: { startsWith: "tickets/" } },
-        { afterPhotoKey: { startsWith: "tickets/" } },
-        { beritaAcaraKey: { startsWith: "berita-acara/" } },
-        { beforePhotoKey: { startsWith: "private/" } },
-      ],
-    },
-    select: { beforePhotoKey: true, afterPhotoKey: true, beritaAcaraKey: true },
-  });
-  for (const row of allUploaded) {
-    if (row.beforePhotoKey) uploadedTestKeys.push(row.beforePhotoKey);
-    if (row.afterPhotoKey) uploadedTestKeys.push(row.afterPhotoKey);
-    if (row.beritaAcaraKey) uploadedTestKeys.push(row.beritaAcaraKey);
-  }
-  const valKeys = await prisma.ticketValidation.findMany({
-    where: { evidencePhotoKey: { not: null } },
-    select: { evidencePhotoKey: true },
-  });
-  for (const v of valKeys) {
-    if (v.evidencePhotoKey) uploadedTestKeys.push(v.evidencePhotoKey);
-  }
+  // Only explicit self-check uploads are deleted in finally(). Never scan all
+  // tickets here: this script can run against a shared cloud bucket that also
+  // holds real citizen/officer photos.
+  // Orphaned test uploads are safer than deleting production media.
 
   // Cleanup test real ticket & restore clean demo seed for dev server
   await prisma.ticket.delete({ where: { id: realTicketId } });
@@ -711,7 +691,7 @@ async function runTests() {
     assert.equal(devOnVercel.status, 401, "X-Dev-User-Id must NEVER work when VERCEL env is set");
 
     delete process.env.JURY_SECRET_TOKEN;
-    const { getJurySecret } = await import("../src/lib/crypto.js");
+    const { getJurySecret } = await import("../backend/src/lib/crypto.js");
     assert.throws(() => getJurySecret(), /Missing required secret env: JURY_SECRET_TOKEN/);
   } finally {
     if (prevVercel === undefined) delete process.env.VERCEL;
@@ -734,7 +714,7 @@ async function runTests() {
   // 16. Sample Assets (#32), Single-Use /api/aktivasi-mitra (US-002) & /api/cron/sla (US-004)
   const fs = await import("node:fs");
   const pathMod = await import("node:path");
-  const { validateFieldPhotoBuffer, validateBeritaAcaraBuffer } = await import("../src/services/media.service.js");
+  const { validateFieldPhotoBuffer, validateBeritaAcaraBuffer } = await import("../backend/src/services/media.service.js");
   const samplesDir = pathMod.resolve(process.cwd(), "public/samples");
   const sampleFiles = fs.readdirSync(samplesDir).filter((f) => f.endsWith(".webp"));
   assert.equal(sampleFiles.length, 16, "Must have 16 calibrated .webp sample photos in public/samples/");

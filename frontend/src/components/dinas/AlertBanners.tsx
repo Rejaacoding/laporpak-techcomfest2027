@@ -1,16 +1,10 @@
 import { Badge, Button, Card } from "../ui/index.js";
-
-export interface AlertTicketSummary {
-  id: string;
-  code: string;
-  title: string;
-  countdownText?: string;
-  appealUsed?: boolean;
-}
+import { formatSlaRemaining } from "../../utils/ticketMappers.ts";
+import type { DinasTicketViewRow } from "../../utils/ticketMappers.ts";
 
 export interface AlertBannersProps {
-  disputedTicket?: AlertTicketSummary | null;
-  escalatedTicket?: AlertTicketSummary | null;
+  disputedTicket?: DinasTicketViewRow | null;
+  escalatedTicket?: DinasTicketViewRow | null;
   onProcessRework?: (ticketId: string) => void;
   onAppealEvidence?: (ticketId: string) => void;
   onUploadEscalation?: (ticketId: string) => void;
@@ -18,11 +12,11 @@ export interface AlertBannersProps {
 }
 
 /**
- * Priority Action Alerts for /dinas — driven 100% by real DISPUTED & ESCALATED tickets.
+ * Priority Action Alerts — live DISPUTED 24h countdown and ESCALATED Berita Acara rows.
  */
 export function AlertBanners({
-  disputedTicket,
-  escalatedTicket,
+  disputedTicket = null,
+  escalatedTicket = null,
   onProcessRework,
   onAppealEvidence,
   onUploadEscalation,
@@ -30,12 +24,20 @@ export function AlertBanners({
 }: AlertBannersProps) {
   if (!disputedTicket && !escalatedTicket) return null;
 
+  const both = Boolean(disputedTicket && escalatedTicket);
+  const disputedSla = disputedTicket
+    ? formatSlaRemaining(disputedTicket)
+    : null;
+  const disputedCountdown = disputedSla?.text.startsWith("Jeda ")
+    ? disputedSla.text.slice("Jeda ".length)
+    : "00:00:00";
+
   return (
     <section
       aria-label="Peringatan prioritas tindak lanjut"
       className={[
         "grid grid-cols-1 gap-3.5",
-        disputedTicket && escalatedTicket ? "xl:grid-cols-2" : "",
+        both ? "xl:grid-cols-2" : "",
         className,
       ].join(" ")}
     >
@@ -47,16 +49,14 @@ export function AlertBanners({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Badge status="DISPUTED" />
             <span className="font-mono font-bold text-xs leading-4 text-purple-800 tabular-nums">
-              {disputedTicket.countdownText || "Wajib respons ≤ 24 jam"}
+              Batas respons: {disputedCountdown}
             </span>
           </div>
 
           <p className="font-sans text-sm leading-5 text-fg">
-            <strong className="font-mono text-xs mr-1.5">
-              {disputedTicket.code}
-            </strong>
-            {disputedTicket.title} — dibantah warga. Pilih kerjakan ulang (+24
-            jam) atau ajukan banding bukti foto sudut baru.
+            {disputedTicket.displayCode} · {disputedTicket.categoryTitle} —{" "}
+            {disputedTicket.location}. Warga mengunggah foto bantahan. Jika diam
+            &gt;24 jam, sistem otomatis memaksa Perbaikan Ulang.
           </p>
 
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
@@ -67,15 +67,19 @@ export function AlertBanners({
             >
               Proses Perbaikan Ulang
             </Button>
-            {!disputedTicket.appealUsed && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onAppealEvidence?.(disputedTicket.id)}
-              >
-                Ajukan Banding Bukti (1×)
-              </Button>
-            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={disputedTicket.appealUsed}
+              disabledReason={
+                disputedTicket.appealUsed
+                  ? "Banding bukti sudah dipakai 1 kali untuk laporan ini."
+                  : undefined
+              }
+              onClick={() => onAppealEvidence?.(disputedTicket.id)}
+            >
+              Ajukan Banding Bukti (1×)
+            </Button>
           </div>
         </Card>
       )}
@@ -88,16 +92,15 @@ export function AlertBanners({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Badge status="ESCALATED" />
             <span className="font-mono font-bold text-xs leading-4 text-red-800 tabular-nums">
-              Penalti -5 poin permanen
+              Penalti permanen -5 poin
             </span>
           </div>
 
           <p className="font-sans text-sm leading-5 text-fg">
-            <strong className="font-mono text-xs mr-1.5">
-              {escalatedTicket.code}
-            </strong>
-            {escalatedTicket.title} — wajib unggah Berita Acara (PDF/JPG/PNG &le;5
-            MB) dan foto lapangan langsung (&le;75 m) untuk menutup tiket.
+            {escalatedTicket.displayCode} · {escalatedTicket.categoryTitle} —{" "}
+            {escalatedTicket.location}. Bantahan putaran ke-2 sah. Tombol Selesai
+            terkunci hingga Berita Acara (PDF/JPG/PNG &le;5 MB) dan Foto Live
+            (&le;75 m) diunggah.
           </p>
 
           <div className="flex flex-wrap items-center gap-2 pt-0.5">

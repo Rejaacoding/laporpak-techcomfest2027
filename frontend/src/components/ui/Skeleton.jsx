@@ -12,19 +12,6 @@ export function Skeleton({ className = "", ...props }) {
   );
 }
 
-export function SkeletonText({ lines = 3, className = "" }) {
-  return (
-    <div className={`space-y-2 ${className}`} aria-hidden="true">
-      {Array.from({ length: lines }).map((_, idx) => (
-        <Skeleton
-          key={idx}
-          className={`h-4 ${idx === lines - 1 ? "w-2/3" : "w-full"}`}
-        />
-      ))}
-    </div>
-  );
-}
-
 export function TicketCardSkeleton() {
   return (
     <div

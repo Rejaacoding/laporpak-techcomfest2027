@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
-import { humanizeError } from "../../lib/humanize.js";
+import { buildToastPayload } from "../../utils/humanize.js";
 
 const TOAST_STYLES = {
   success: {
@@ -32,8 +32,24 @@ const TOAST_STYLES = {
   },
 };
 
+/**
+ * @typedef {Object} ShowToastOptions
+ * @property {"success"|"warning"|"error"|"info"} [type]
+ * @property {string} [title]
+ * @property {string} [message]
+ * @property {unknown} [error]
+ * @property {number} [duration]
+ */
+
+/**
+ * @typedef {Object} ToastContextValue
+ * @property {(options: ShowToastOptions) => string} showToast
+ * @property {(id: string) => void} dismissToast
+ */
+
+/** @type {import("react").Context<ToastContextValue>} */
 const ToastContext = createContext({
-  showToast: () => {},
+  showToast: () => "",
   dismissToast: () => {},
 });
 
@@ -56,15 +72,15 @@ export function ToastProvider({ children }) {
   }, []);
 
   const showToast = useCallback(
-    ({ type = "info", message, error, duration = 5000 }) => {
+    /** @type {(options: ShowToastOptions) => string} */
+    ({ type = "info", title, message, error, duration = 5000 }) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const safeMessage = error
-        ? humanizeError(error)
-        : type === "error"
-          ? humanizeError(message)
-          : message;
+      const payload = buildToastPayload({ type, title, message, error });
 
-      setToasts((prev) => [...prev.slice(-3), { id, type, message: safeMessage }]);
+      setToasts((prev) => [
+        ...prev.slice(-3),
+        { id, type: payload.type, title: payload.title, message: payload.message },
+      ]);
 
       if (duration > 0) {
         const timer = setTimeout(() => {
@@ -108,9 +124,18 @@ export function ToastProvider({ children }) {
               ].join(" ")}
             >
               <Icon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-              <p className="flex-1 text-sm font-medium leading-snug">
-                {toast.message}
-              </p>
+              <div className="flex-1 min-w-0">
+                {toast.title && (
+                  <p className="font-head font-semibold text-sm leading-snug">
+                    {toast.title}
+                  </p>
+                )}
+                {toast.message && (
+                  <p className="text-sm font-medium leading-snug">
+                    {toast.message}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => dismissToast(toast.id)}
