@@ -1,4 +1,4 @@
-import { CATEGORIES, LIMITS, TICKET_STATUSES } from "../shared/constants.js";
+import { CATEGORIES, DEPARTMENTS, LIMITS, TICKET_STATUSES } from "../shared/constants.js";
 import { prisma } from "../lib/prisma.js";
 import { invalidatePublicCaches, redis } from "../lib/redis.js";
 import { AppError } from "../lib/errors.js";
@@ -39,6 +39,10 @@ function assertInitialWindowOpen(ticket, actionLabel) {
 }
 
 export async function listDinasTickets({ departmentId, query }) {
+  const cacheKey = `cache:dinas:${departmentId}:${query.status || "all"}:${query.category || "all"}`;
+  const cached = await redis.getJson(cacheKey);
+  if (cached) return cached;
+
   await evaluateActiveTicketsBatch();
 
   const rows = await prisma.ticket.findMany({
@@ -72,10 +76,11 @@ export async function listDinasTickets({ departmentId, query }) {
     return new Date(a.slaDeadline).getTime() - new Date(b.slaDeadline).getTime();
   });
 
-  return rows.map((t) => ({
+  const payload = rows.map((t) => ({
     id: t.id,
     code: t.code,
     title: t.title,
+    description: t.description,
     category: t.category,
     categoryLabel: CATEGORIES[t.category]?.label || t.category,
     tier: CATEGORIES[t.category]?.tier || "STANDAR",
@@ -83,6 +88,9 @@ export async function listDinasTickets({ departmentId, query }) {
     statusLabel: TICKET_STATUSES[t.status]?.label || t.status,
     publicLat: t.publicLat,
     publicLng: t.publicLng,
+    beforePhotoUrl: t.isNsfwPendingReview ? null : t.beforePhotoUrl,
+    afterPhotoUrl: t.afterPhotoUrl,
+    isNsfwPendingReview: t.isNsfwPendingReview,
     reporterAlias: t.reporter.aliasName,
     slaDeadline: t.slaDeadline,
     syncedAt: t.syncedAt,
@@ -92,8 +100,14 @@ export async function listDinasTickets({ departmentId, query }) {
     appealUsed: t.appealUsed,
     isChronicOverdue: t.isChronicOverdue,
     isFastResolveAnomaly: t.isFastResolveAnomaly,
+    outOfScopeAgency: t.outOfScopeAgency,
+    outOfScopeReason: t.outOfScopeReason,
+    rejectedSpamReason: t.rejectedSpamReason,
     isDemoData: t.isDemoData,
   }));
+
+  await redis.setJson(cacheKey, payload, 60);
+  return payload;
 }
 
 async function prepareOfficerPhoto({ req, ticketId, actionType, body }) {
@@ -119,9 +133,10 @@ async function prepareOfficerPhoto({ req, ticketId, actionType, body }) {
 
 export async function executeDinasAction({ req, ticketId, action, body }) {
   const officer = req.user;
+  const actorDept =
+    DEPARTMENTS[officer.departmentId] ||
+    (await prisma.department.findUniqueOrThrow({ where: { id: officer.departmentId } }));
   await evaluateTicketLazy(ticketId);
-
-  const actorDept = await prisma.department.findUniqueOrThrow({ where: { id: officer.departmentId } });
 
   // Aksi berfoto (resolve, counter-dispute, resolve-escalated) memvalidasi media & nonce sebelum TX
   let nonceKey = null;
@@ -144,13 +159,17 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
     }
 
     try {
-      uploadedAfter = await uploadFieldPhoto(ticketId, prep.parsedPhoto, {
-        isNsfwPendingReview: prep.moderation.isNsfwPendingReview,
-      });
+      const [afterRes, beritaRes] = await Promise.all([
+        uploadFieldPhoto(ticketId, prep.parsedPhoto, {
+          isNsfwPendingReview: prep.moderation.isNsfwPendingReview,
+        }),
+        parsedBerita ? uploadBeritaAcara(ticketId, parsedBerita) : Promise.resolve(null),
+      ]);
+      uploadedAfter = afterRes;
       uploadedKeys.push(uploadedAfter.key);
 
-      if (parsedBerita) {
-        uploadedBerita = await uploadBeritaAcara(ticketId, parsedBerita);
+      if (beritaRes) {
+        uploadedBerita = beritaRes;
         uploadedKeys.push(uploadedBerita.key);
       }
     } catch (err) {

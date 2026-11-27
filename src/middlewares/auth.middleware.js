@@ -15,9 +15,32 @@ export const JURY_ROLE_USER_MAP = {
   ADMIN_SATPOL_PP: "demo-admin-satpolpp",
 };
 
+const ADMIN_USER_CACHE_TTL_MS = 30_000;
+const adminUserCache = new Map();
+
+async function getUserCachedIfAdmin(where) {
+  const cacheKey = where.id ? `id:${where.id}` : where.email ? `email:${where.email}` : null;
+  if (cacheKey) {
+    const hit = adminUserCache.get(cacheKey);
+    if (hit && Date.now() < hit.exp) return hit.user;
+  }
+  const user = await prisma.user.findUnique({ where });
+  if (user && user.role === "ADMIN_DINAS") {
+    const exp = Date.now() + ADMIN_USER_CACHE_TTL_MS;
+    adminUserCache.set(`id:${user.id}`, { user, exp });
+    if (user.email) adminUserCache.set(`email:${user.email}`, { user, exp });
+  }
+  return user;
+}
+
 async function findOrProvisionSupabaseUser(sbUser) {
-  const existing = await prisma.user.findUnique({ where: { id: sbUser.id } });
-  if (existing) return existing;
+  const existingById = await getUserCachedIfAdmin({ id: sbUser.id });
+  if (existingById) return existingById;
+
+  if (sbUser.email) {
+    const existingByEmail = await getUserCachedIfAdmin({ email: sbUser.email });
+    if (existingByEmail) return existingByEmail;
+  }
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const aliasName = generateAliasName();
@@ -59,7 +82,7 @@ export async function attachAuth(req, _res, next) {
 
       const requestedRole = String(req.header("x-jury-role") || parsed.roleKey || "WARGA_PELAPOR").toUpperCase();
       const targetUserId = JURY_ROLE_USER_MAP[requestedRole] || JURY_ROLE_USER_MAP.WARGA_PELAPOR;
-      const demoUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+      const demoUser = await getUserCachedIfAdmin({ id: targetUserId });
       if (demoUser) {
         req.user = demoUser;
         return next();

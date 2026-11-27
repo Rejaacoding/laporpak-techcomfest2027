@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -49,6 +49,7 @@ interface ApiDinasTicket {
   id: string;
   code: string;
   title: string;
+  description?: string;
   category: string;
   categoryLabel: string;
   tier: "DARURAT" | "MENENGAH" | "STANDAR";
@@ -56,6 +57,9 @@ interface ApiDinasTicket {
   statusLabel: string;
   publicLat: number;
   publicLng: number;
+  beforePhotoUrl?: string | null;
+  afterPhotoUrl?: string | null;
+  isNsfwPendingReview?: boolean;
   reporterAlias: string;
   slaDeadline: string;
   syncedAt: string;
@@ -64,6 +68,10 @@ interface ApiDinasTicket {
   transferCount: number;
   appealUsed: boolean;
   isChronicOverdue: boolean;
+  isFastResolveAnomaly?: boolean;
+  outOfScopeAgency?: string | null;
+  outOfScopeReason?: string | null;
+  rejectedSpamReason?: string | null;
   isDemoData: boolean;
 }
 
@@ -93,7 +101,10 @@ const OUT_OF_SCOPE_AGENCIES = [
   { code: "LAINNYA", label: "Instansi Non-Pemda Lainnya" },
 ];
 
-function formatRelativeSla(ticket: ApiDinasTicket): {
+function formatRelativeSla(
+  ticket: ApiDinasTicket,
+  nowMs: number
+): {
   slaText: string;
   slaTone: DinasTicketRow["slaTone"];
 } {
@@ -115,7 +126,7 @@ function formatRelativeSla(ticket: ApiDinasTicket): {
   if (ticket.status === "DISPUTED") {
     if (ticket.disputedAt) {
       const remMs =
-        new Date(ticket.disputedAt).getTime() + 24 * 3600 * 1000 - Date.now();
+        new Date(ticket.disputedAt).getTime() + 24 * 3600 * 1000 - nowMs;
       const hrs = Math.max(0, Math.floor(remMs / 3600000));
       const mins = Math.max(0, Math.floor((remMs % 3600000) / 60000));
       return {
@@ -129,7 +140,7 @@ function formatRelativeSla(ticket: ApiDinasTicket): {
     return { slaText: "Wajib Berita Acara", slaTone: "overdue" };
   }
 
-  const diffMs = new Date(ticket.slaDeadline).getTime() - Date.now();
+  const diffMs = new Date(ticket.slaDeadline).getTime() - nowMs;
   const absHrs = Math.floor(Math.abs(diffMs) / 3600000);
   const absMins = Math.floor((Math.abs(diffMs) % 3600000) / 60000);
   if (diffMs < 0 || ticket.status === "OVERDUE") {
@@ -144,10 +155,13 @@ function formatRelativeSla(ticket: ApiDinasTicket): {
   };
 }
 
-function buildActionsForTicket(t: ApiDinasTicket): TicketActionItem[] {
+function buildActionsForTicket(
+  t: ApiDinasTicket,
+  nowMs: number
+): TicketActionItem[] {
   const initialWindowHours = t.tier === "DARURAT" ? 12 : 24;
   const elapsedHours =
-    (Date.now() - new Date(t.syncedAt).getTime()) / (3600 * 1000);
+    (nowMs - new Date(t.syncedAt).getTime()) / (3600 * 1000);
   const initialWindowOpen = t.status === "OPEN" && elapsedHours <= initialWindowHours;
 
   if (t.status === "OPEN") {
@@ -174,7 +188,7 @@ function buildActionsForTicket(t: ApiDinasTicket): TicketActionItem[] {
     actions.push({
       id: "reject-spam",
       label: "Tolak Spam",
-      variant: "danger-outline",
+      variant: "danger",
       disabled: !initialWindowOpen,
       disabledReason: !initialWindowOpen
         ? `Lewat batas ${initialWindowHours} jam sejak laporan masuk.`
@@ -184,10 +198,7 @@ function buildActionsForTicket(t: ApiDinasTicket): TicketActionItem[] {
   }
 
   if (t.status === "IN_PROGRESS" || t.status === "OVERDUE") {
-    return [
-      { id: "resolve", label: "Laporkan Selesai", variant: "primary" },
-      { id: "out-of-scope", label: "Luar Wewenang", variant: "secondary" },
-    ];
+    return [{ id: "resolve", label: "Laporkan Selesai", variant: "primary" }];
   }
 
   if (t.status === "DISPUTED") {
@@ -222,10 +233,11 @@ function buildActionsForTicket(t: ApiDinasTicket): TicketActionItem[] {
   return [];
 }
 
-function mapApiToRow(t: ApiDinasTicket): DinasTicketRow {
-  const { slaText, slaTone } = formatRelativeSla(t);
+function mapApiToRow(t: ApiDinasTicket, nowMs: number): DinasTicketRow {
+  const { slaText, slaTone } = formatRelativeSla(t, nowMs);
   return {
     id: t.code || t.id,
+    ticketId: t.id,
     status: t.status,
     categoryTitle: t.title || t.categoryLabel,
     tier: t.tier,
@@ -234,7 +246,8 @@ function mapApiToRow(t: ApiDinasTicket): DinasTicketRow {
     slaText,
     slaTone,
     supportCount: t.supportCount,
-    actions: buildActionsForTicket(t),
+    isFastResolveAnomaly: Boolean(t.isFastResolveAnomaly),
+    actions: buildActionsForTicket(t, nowMs),
   };
 }
 
@@ -270,8 +283,10 @@ export function DinasDashboardPage() {
   const [deptScore, setDeptScore] = useState<number>(80);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
 
-  // Modal state for executing any of the 8 Dinas actions
+  // Modal state for executing Dinas actions that require confirmation/inputs
   const [selected, setSelected] = useState<{
     ticket: ApiDinasTicket;
     action: TicketActionItem;
@@ -283,6 +298,7 @@ export function DinasDashboardPage() {
   const [targetDepartmentId, setTargetDepartmentId] = useState("DPU");
   const [agency, setAgency] = useState("PLN");
   const [reason, setReason] = useState("");
+  const [isNsfwContent, setIsNsfwContent] = useState(false);
   const [note, setNote] = useState("");
   const [officerLat, setOfficerLat] = useState<number | null>(null);
   const [officerLng, setOfficerLng] = useState<number | null>(null);
@@ -296,29 +312,112 @@ export function DinasDashboardPage() {
   );
   const [beritaAcaraFilename, setBeritaAcaraFilename] = useState("");
 
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true);
-    setErrorMsg("");
-    try {
-      const [listData, raporData] = await Promise.all([
-        listDinasTickets({}, accessToken),
-        getRapor().catch(() => null),
-      ]);
-      const items = Array.isArray(listData) ? listData : listData?.tickets || [];
-      setTickets(items);
-      if (raporData?.departments && user?.departmentId) {
-        const mine = raporData.departments.find(
-          (d: { id: string; integrityScore: number }) =>
-            d.id === user.departmentId
-        );
-        if (mine) setDeptScore(Math.round(mine.integrityScore));
+  // Pre-warmed capture nonce so photo actions skip extra 1s roundtrip on submit
+  const prewarmedNonceRef = useRef<{
+    key: string;
+    nonce: string;
+    expiresAt: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const fetchDashboard = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) setLoading(true);
+      setErrorMsg("");
+      try {
+        const [listData, raporData] = await Promise.all([
+          listDinasTickets({}, accessToken),
+          getRapor().catch(() => null),
+        ]);
+        const items = Array.isArray(listData) ? listData : listData?.tickets || [];
+        setTickets(items);
+        setNowMs(Date.now());
+        if (raporData?.departments && user?.departmentId) {
+          const mine = raporData.departments.find(
+            (d: { id: string; integrityScore: number }) =>
+              d.id === user.departmentId
+          );
+          if (mine) setDeptScore(Math.round(mine.integrityScore));
+        }
+      } catch (err) {
+        if (!silent) setErrorMsg(humanizeError(err));
+      } finally {
+        if (!silent) setLoading(false);
       }
-    } catch (err) {
-      setErrorMsg(humanizeError(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, user?.departmentId]);
+    },
+    [accessToken, user?.departmentId]
+  );
+
+  const prewarmPhotoNonce = useCallback(
+    (ticketId: string, actionCode: DinasActionCode) => {
+      const nonceAction =
+        actionCode === "resolve"
+          ? "RESOLVE_TICKET"
+          : actionCode === "counter-dispute"
+            ? "APPEAL_TICKET"
+            : actionCode === "resolve-escalated"
+              ? "RESOLVE_ESCALATED"
+              : null;
+      if (!nonceAction) return;
+      const cacheKey = `${ticketId}:${nonceAction}`;
+      if (
+        prewarmedNonceRef.current &&
+        prewarmedNonceRef.current.key === cacheKey &&
+        Date.now() < prewarmedNonceRef.current.expiresAt
+      ) {
+        return;
+      }
+      issueCaptureNonce({ actionType: nonceAction, ticketId }, accessToken)
+        .then((res) => {
+          const nonce = res?.captureNonce || res?.nonce;
+          if (nonce) {
+            prewarmedNonceRef.current = {
+              key: cacheKey,
+              nonce,
+              expiresAt: Date.now() + 240_000,
+            };
+          }
+        })
+        .catch(() => {});
+    },
+    [accessToken]
+  );
+
+  const applyServerActionPatch = useCallback(
+    (
+      ticketId: string,
+      actionCode: DinasActionCode,
+      serverData: Record<string, unknown> | null
+    ) => {
+      setTickets((prev) => {
+        if (actionCode === "transfer") {
+          return prev.filter((item) => item.id !== ticketId);
+        }
+        return prev.map((item) => {
+          if (item.id !== ticketId) return item;
+          const nextStatus =
+            (serverData?.status as TicketStatusCode) || item.status;
+          return {
+            ...item,
+            status: nextStatus,
+            slaDeadline:
+              (serverData?.slaDeadline as string) || item.slaDeadline,
+            appealUsed:
+              actionCode === "counter-dispute" ? true : item.appealUsed,
+            isFastResolveAnomaly:
+              typeof serverData?.isFastResolveAnomaly === "boolean"
+                ? serverData.isFastResolveAnomaly
+                : item.isFastResolveAnomaly,
+          };
+        });
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     fetchDashboard();
@@ -454,8 +553,8 @@ export function DinasDashboardPage() {
           t.categoryLabel.toLowerCase().includes(q)
         );
       })
-      .map(mapApiToRow);
-  }, [tickets, activeFilter, searchQuery]);
+      .map((t) => mapApiToRow(t, nowMs));
+  }, [tickets, activeFilter, searchQuery, nowMs]);
 
   const openActionModal = (ticket: ApiDinasTicket, action: TicketActionItem) => {
     const otherDept =
@@ -463,6 +562,7 @@ export function DinasDashboardPage() {
     setTargetDepartmentId(otherDept);
     setAgency("PLN");
     setReason("");
+    setIsNsfwContent(false);
     setNote("");
     setPhotoBase64(null);
     setClientNsfwScore(0);
@@ -475,13 +575,50 @@ export function DinasDashboardPage() {
       setOfficerLng(ticket.publicLng);
       setOfficerAcc(10);
     }
+    const actionCode = action.id as DinasActionCode;
+    if (
+      actionCode === "resolve" ||
+      actionCode === "counter-dispute" ||
+      actionCode === "resolve-escalated"
+    ) {
+      prewarmPhotoNonce(ticket.id, actionCode);
+    }
     setSelected({ ticket, action });
   };
 
+  const executeQuickProcess = async (ticket: ApiDinasTicket) => {
+    const lockKey = `${ticket.id}:process`;
+    if (busyActionKey) return;
+    setBusyActionKey(lockKey);
+    try {
+      const serverData = await executeDinasAction(
+        ticket.id,
+        "process",
+        {},
+        accessToken
+      );
+      applyServerActionPatch(ticket.id, "process", serverData);
+      showToast({
+        type: "success",
+        title: "Pengerjaan dimulai",
+        message: `${ticket.code} kini berstatus Sedang Ditangani dan tercatat di segel audit.`,
+      });
+      void fetchDashboard({ silent: true });
+    } catch (err) {
+      showToast({ type: "error", error: err });
+    } finally {
+      setBusyActionKey(null);
+    }
+  };
+
   const handleRowAction = (row: DinasTicketRow, action: TicketActionItem) => {
-    if (action.disabled) return;
-    const raw = ticketByCodeOrId.get(row.id);
+    if (action.disabled || busyActionKey) return;
+    const raw = ticketByCodeOrId.get(row.ticketId || row.id);
     if (!raw) return;
+    if (action.id === "process") {
+      void executeQuickProcess(raw);
+      return;
+    }
     openActionModal(raw, action);
   };
 
@@ -594,7 +731,7 @@ export function DinasDashboardPage() {
       } else if (actionCode === "out-of-scope") {
         body = { agency, reason: reason.trim() };
       } else if (actionCode === "reject-spam") {
-        body = { reason: reason.trim() };
+        body = { reason: reason.trim(), isNsfwContent };
       } else if (needsPhoto) {
         const nonceAction =
           actionCode === "resolve"
@@ -602,11 +739,22 @@ export function DinasDashboardPage() {
             : actionCode === "counter-dispute"
               ? "APPEAL_TICKET"
               : "RESOLVE_ESCALATED";
-        const nonceRes = await issueCaptureNonce(
-          { actionType: nonceAction, ticketId },
-          accessToken
-        );
-        const captureNonce = nonceRes?.captureNonce || nonceRes?.nonce;
+        const cacheKey = `${ticketId}:${nonceAction}`;
+        let captureNonce: string | undefined;
+        if (
+          prewarmedNonceRef.current &&
+          prewarmedNonceRef.current.key === cacheKey &&
+          Date.now() < prewarmedNonceRef.current.expiresAt
+        ) {
+          captureNonce = prewarmedNonceRef.current.nonce;
+          prewarmedNonceRef.current = null;
+        } else {
+          const nonceRes = await issueCaptureNonce(
+            { actionType: nonceAction, ticketId },
+            accessToken
+          );
+          captureNonce = nonceRes?.captureNonce || nonceRes?.nonce;
+        }
         body = {
           lat: officerLat,
           lng: officerLng,
@@ -621,14 +769,20 @@ export function DinasDashboardPage() {
         };
       }
 
-      await executeDinasAction(ticketId, actionCode, body, accessToken);
+      const serverData = await executeDinasAction(
+        ticketId,
+        actionCode,
+        body,
+        accessToken
+      );
+      applyServerActionPatch(ticketId, actionCode, serverData);
       showToast({
         type: "success",
         title: `${selected.action.label} berhasil`,
         message: `${selected.ticket.code} berhasil diperbarui dan tercatat di segel audit.`,
       });
       setSelected(null);
-      await fetchDashboard();
+      void fetchDashboard({ silent: true });
     } catch (err) {
       const msg = humanizeError(err);
       setModalError(msg);
@@ -641,7 +795,7 @@ export function DinasDashboardPage() {
   const firstDisputed = useMemo(() => {
     const t = tickets.find((item) => item.status === "DISPUTED");
     if (!t) return null;
-    const { slaText } = formatRelativeSla(t);
+    const { slaText } = formatRelativeSla(t, nowMs);
     return {
       id: t.id,
       code: t.code,
@@ -649,7 +803,7 @@ export function DinasDashboardPage() {
       countdownText: slaText,
       appealUsed: t.appealUsed,
     };
-  }, [tickets]);
+  }, [tickets, nowMs]);
 
   const firstEscalated = useMemo(() => {
     const t = tickets.find((item) => item.status === "ESCALATED");
@@ -702,7 +856,7 @@ export function DinasDashboardPage() {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={fetchDashboard}
+                onClick={() => void fetchDashboard()}
                 loading={loading}
               >
                 <RefreshCw className="size-4" aria-hidden="true" />
@@ -717,7 +871,7 @@ export function DinasDashboardPage() {
                 <AlertTriangle className="size-5 shrink-0 mt-0.5" />
                 <p>{errorMsg}</p>
               </div>
-              <Button variant="secondary" size="sm" onClick={fetchDashboard}>
+              <Button variant="secondary" size="sm" onClick={() => void fetchDashboard()}>
                 Coba Lagi
               </Button>
             </Card>
@@ -777,6 +931,7 @@ export function DinasDashboardPage() {
                 activeTab={activeFilter}
                 onTabChange={handleFilterChange}
                 counts={counts}
+                busyActionKey={busyActionKey}
                 onAction={handleRowAction}
                 onResetFilters={() => {
                   handleFilterChange("ALL");
@@ -804,6 +959,32 @@ export function DinasDashboardPage() {
         }
       >
         <div className="flex flex-col gap-4">
+          {selected && (selected.ticket.beforePhotoUrl || selected.ticket.description || selected.ticket.isNsfwPendingReview) && (
+            <div className="rounded-xl border border-line bg-surface-2/60 p-3 flex flex-col sm:flex-row gap-3">
+              {selected.ticket.isNsfwPendingReview ? (
+                <div className="sm:w-28 h-20 rounded-lg border border-amber-300 bg-amber-50 flex items-center justify-center px-2 text-center text-[11px] font-medium text-amber-900 shrink-0">
+                  Foto ditahan (tinjauan NSFW)
+                </div>
+              ) : selected.ticket.beforePhotoUrl ? (
+                <img
+                  src={selected.ticket.beforePhotoUrl}
+                  alt={`Foto bukti awal ${selected.ticket.code}`}
+                  className="sm:w-28 h-20 rounded-lg object-cover border border-line shrink-0"
+                />
+              ) : null}
+              <div className="min-w-0 space-y-1 text-xs">
+                <p className="font-semibold text-fg">
+                  Bukti Awal Pelapor ({selected.ticket.reporterAlias})
+                </p>
+                {selected.ticket.description && (
+                  <p className="text-fg-muted line-clamp-3">
+                    {selected.ticket.description}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeActionCode === "transfer" && (
             <>
               <div>
@@ -873,14 +1054,32 @@ export function DinasDashboardPage() {
           )}
 
           {activeActionCode === "reject-spam" && (
-            <Textarea
-              label="Alasan Penolakan Spam / Tidak Relevan"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              minChars={15}
-              maxLength={500}
-              placeholder="Jelaskan alasan penolakan secara transparan (min. 15 karakter, tampil di linimasa tiket)..."
-            />
+            <div className="space-y-3">
+              <Textarea
+                label="Alasan Penolakan Spam / Tidak Relevan"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                minChars={15}
+                maxLength={500}
+                placeholder="Jelaskan alasan penolakan secara transparan (min. 15 karakter, tampil di linimasa tiket)..."
+              />
+              <label className="flex items-start gap-2.5 rounded-xl border border-line bg-surface-2/50 p-3 text-xs text-fg cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isNsfwContent}
+                  onChange={(e) => setIsNsfwContent(e.target.checked)}
+                  className="mt-0.5 size-4 rounded border-line accent-red-600"
+                />
+                <span>
+                  <strong className="block font-semibold">
+                    Foto berisi konten tidak pantas / NSFW
+                  </strong>
+                  <span className="text-fg-muted">
+                    Centang untuk menghapus foto secara permanen segera (bukan karantina 7 hari).
+                  </span>
+                </span>
+              </label>
+            </div>
           )}
 
           {needsPhotoModal && (
@@ -998,10 +1197,7 @@ export function DinasDashboardPage() {
             </Button>
             <Button
               variant={
-                selected?.action.variant === "danger" ||
-                selected?.action.variant === "danger-outline"
-                  ? "danger"
-                  : "primary"
+                selected?.action.variant === "danger" ? "danger" : "primary"
               }
               size="md"
               loading={submitting}

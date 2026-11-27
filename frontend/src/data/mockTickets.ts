@@ -26,6 +26,7 @@ export interface TicketActionItem {
 
 export interface DinasTicketRow {
   id: string;
+  ticketId?: string;
   status: TicketStatusCode;
   categoryTitle: string;
   tier: SlaTierCode;
@@ -34,6 +35,7 @@ export interface DinasTicketRow {
   slaText: string;
   slaTone: "overdue" | "disputed" | "warning" | "normal" | "muted";
   supportCount: number;
+  isFastResolveAnomaly?: boolean;
   actions: TicketActionItem[];
 }
 
