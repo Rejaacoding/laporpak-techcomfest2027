@@ -6,11 +6,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { attachAuth } from "../src/middlewares/auth.middleware.js";
-import { errorHandler } from "../src/middlewares/error.middleware.js";
-import { AppError } from "../src/lib/errors.js";
-import { hasSupabaseConfig } from "../src/lib/supabase.js";
-import apiRoutes from "../src/routes/api.routes.js";
+import { attachAuth } from "../backend/src/middlewares/auth.middleware.js";
+import { errorHandler } from "../backend/src/middlewares/error.middleware.js";
+import { AppError } from "../backend/src/lib/errors.js";
+import { hasSupabaseConfig } from "../backend/src/lib/supabase.js";
+import apiRoutes from "../backend/src/routes/api.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,12 +51,21 @@ app.use(
   })
 );
 app.use(express.json({ limit: "8mb" }));
+morgan.token("safe-url", (req) => req.originalUrl.split("?")[0]);
 if (process.env.NODE_ENV !== "test") {
-  app.use(morgan("dev"));
+  app.use(morgan(":method :safe-url :status :response-time ms"));
 }
 
 if (fs.existsSync(frontendDistPath)) {
-  app.use(express.static(frontendDistPath));
+  app.use(
+    express.static(frontendDistPath, {
+      setHeaders(res, filePath) {
+        if (filePath.endsWith("index.html")) {
+          res.setHeader("Cache-Control", "no-store");
+        }
+      },
+    })
+  );
 }
 app.use(express.static(publicPath));
 if (process.env.NODE_ENV !== "production" && !hasSupabaseConfig()) {
@@ -76,8 +85,12 @@ app.use("/api/*", (_req, res) => {
   });
 });
 
-app.get("*", (_req, res) => {
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/assets/") || path.extname(req.path)) {
+    return res.status(404).end();
+  }
   const spaIndex = path.join(frontendDistPath, "index.html");
+  res.set("Cache-Control", "no-store");
   res.sendFile(fs.existsSync(spaIndex) ? spaIndex : path.join(publicPath, "index.html"));
 });
 

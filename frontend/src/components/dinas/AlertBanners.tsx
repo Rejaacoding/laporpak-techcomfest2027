@@ -1,6 +1,6 @@
 import { Badge, Button, Card } from "../ui/index.js";
-import { formatSlaRemaining } from "../../lib/ticketMappers.ts";
-import type { DinasTicketViewRow } from "../../lib/ticketMappers.ts";
+import { formatSlaRemaining } from "../../utils/ticketMappers.ts";
+import type { DinasTicketViewRow } from "../../utils/ticketMappers.ts";
 
 export interface AlertBannersProps {
   disputedTicket?: DinasTicketViewRow | null;

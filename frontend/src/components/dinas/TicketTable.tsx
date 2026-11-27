@@ -4,7 +4,7 @@ import type { DinasQueueCounts, DinasQueueFilterKey } from "../layout/DinasSideb
 import type {
   DinasTicketViewRow,
   TicketActionItem,
-} from "../../lib/ticketMappers.ts";
+} from "../../utils/ticketMappers.ts";
 
 export interface TicketTableProps {
   tickets: DinasTicketViewRow[];

@@ -36,7 +36,7 @@ export function BottomNavbar({
     activeTab ??
     (pathname.startsWith("/lapor")
       ? "lapor"
-      : pathname.startsWith("/rapor")
+      : pathname.startsWith("/catatan")
         ? "rapor"
         : pathname.startsWith("/peta")
           ? "peta"
@@ -122,9 +122,9 @@ export function BottomNavbar({
           </div>
         )}
 
-        {/* 4. Rapor */}
+        {/* 4. Catatan */}
         <Link
-          to="/rapor"
+          to="/catatan"
           aria-current={resolvedActive === "rapor" ? "page" : undefined}
           className={tabClass(resolvedActive === "rapor")}
         >

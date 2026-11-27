@@ -5,7 +5,7 @@ import {
   saveLaporDraft,
   clearLaporDraft,
   validateLaporDraftForSubmit,
-} from "../src/lib/laporDraft.ts";
+} from "../src/utils/laporDraft.ts";
 
 function createMemoryStorage() {
   const map = new Map();

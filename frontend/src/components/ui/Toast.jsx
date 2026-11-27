@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
-import { buildToastPayload } from "../../lib/humanize.js";
+import { buildToastPayload } from "../../utils/humanize.js";
 
 const TOAST_STYLES = {
   success: {

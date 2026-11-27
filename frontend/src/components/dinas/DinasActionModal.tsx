@@ -6,14 +6,15 @@ import {
   fetchSampleAsBase64,
   issueCaptureNonce,
   onJuryEvent,
-} from "../../lib/api.js";
-import { humanizeError } from "../../lib/humanize.js";
+} from "../../services/api.js";
+import { humanizeError } from "../../utils/humanize.js";
+import { distanceMeters } from "../../utils/ticketMappers.ts";
 import type {
   DinasActionId,
   DinasTicketViewRow,
   TicketActionItem,
-} from "../../lib/ticketMappers.ts";
-import LiveCameraCapture from "../../features/camera/LiveCameraCapture.jsx";
+} from "../../utils/ticketMappers.ts";
+import LiveCameraCapture from "../../components/camera/LiveCameraCapture.jsx";
 
 const DEPARTMENT_OPTIONS = [
   { id: "DISHUB", label: "Dinas Perhubungan (Dishub)" },
@@ -38,22 +39,6 @@ const PHOTO_ACTION_TYPES: Partial<Record<DinasActionId, string>> = {
 };
 
 const MAX_BERITA_ACARA_BYTES = 5 * 1024 * 1024;
-
-function distanceMeters(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number
-): number {
-  const toRad = (value: number) => (value * Math.PI) / 180;
-  const earthRadiusM = 6371000;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return Math.round(2 * earthRadiusM * Math.asin(Math.sqrt(h)));
-}
 
 export interface DinasActionModalProps {
   open: boolean;
@@ -204,7 +189,7 @@ export function DinasActionModal({
     lng !== null &&
     Number.isFinite(ticketLat) &&
     Number.isFinite(ticketLng)
-      ? distanceMeters(lat, lng, ticketLat, ticketLng)
+      ? distanceMeters({ lat, lng }, { lat: ticketLat, lng: ticketLng })
       : null;
   const gpsAccurate =
     gpsAccuracyMeters !== null && gpsAccuracyMeters > 0 && gpsAccuracyMeters <= 50;

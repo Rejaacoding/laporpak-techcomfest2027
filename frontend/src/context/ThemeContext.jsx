@@ -8,7 +8,7 @@ export const VALID_THEMES = ["warm", "blueprint", "slate"];
  * - /lapor     -> blueprint
  * - /tiket/:id -> blueprint
  * - /dinas     -> warm
- * - /rapor     -> warm (light Catatan Kerja page)
+ * - /catatan  -> warm (light Catatan page)
  */
 export function getThemeForPath(pathname = "/") {
   if (pathname.startsWith("/lapor") || pathname.startsWith("/tiket")) {

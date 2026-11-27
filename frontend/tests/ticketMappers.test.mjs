@@ -5,8 +5,8 @@ import {
   buildDinasTicketActions,
   computeDinasQueueCounts,
   mapRaporResponse,
-} from "../src/lib/ticketMappers.ts";
-import { buildToastPayload } from "../src/lib/humanize.js";
+} from "../src/utils/ticketMappers.ts";
+import { buildToastPayload } from "../src/utils/humanize.js";
 
 test("projectCoordToMapPercent clamps out-of-bounds and NaN safely", () => {
   const center = projectCoordToMapPercent(-7.349, 112.728);
@@ -91,6 +91,10 @@ test("mapRaporResponse handles empty clusters and zero totals without NaN", () =
         rejectedSpamCount: 0,
         rejectedSpamRatio: 0,
         rejectedSpamWarning: false,
+        disputedCount: 1,
+        averageRating: 4.5,
+        ratingCount: 2,
+        recentRatings: [],
       },
     ],
     clusterPoints: [],
@@ -98,6 +102,9 @@ test("mapRaporResponse handles empty clusters and zero totals without NaN", () =
   assert.equal(mapped.clusters.length, 0);
   assert.equal(mapped.departments[0].outOfScopePct, 0);
   assert.equal(mapped.departments[0].slaCompliance, "100.0%");
+  assert.equal(mapped.departments[0].disputedCount, 1);
+  assert.equal(mapped.departments[0].ratingAverage, 4.5);
+  assert.equal(mapped.departments[0].ratingCount, 2);
 });
 
 test("buildToastPayload preserves title and sanitizes technical error", () => {

@@ -15,15 +15,16 @@ import {
 import { AuthProvider, useAuth } from "./context/AuthContext.tsx";
 import { CitizenOnly, RequireAuth } from "./components/auth/index.ts";
 import { Button, ToastProvider } from "./components/ui/index.js";
-import LoginPage from "./pages/LoginPage.tsx";
-import DinasDashboardPage from "./app/dinas/page.tsx";
-import DinasPetaPage from "./app/dinas/peta.tsx";
-import DinasRaporPage from "./app/dinas/rapor.tsx";
-import WargaBerandaPage from "./app/warga/page.tsx";
-import WargaPetaPage from "./app/warga/peta.tsx";
-import WargaLaporPage from "./app/warga/lapor.tsx";
-import WargaRaporPage from "./app/warga/rapor.tsx";
-import JuryPanel from "./features/jury/JuryPanel.jsx";
+import LoginPage from "./pages/auth/LoginPage.tsx";
+import DinasDashboardPage from "./pages/dinas/DashboardPage.tsx";
+import DinasPetaPage from "./pages/dinas/PetaPage.tsx";
+import DinasCatatanPage from "./pages/dinas/CatatanPage.tsx";
+import WargaBerandaPage from "./pages/warga/BerandaPage.tsx";
+import WargaPetaPage from "./pages/warga/PetaPage.tsx";
+import WargaLaporPage from "./pages/warga/LaporPage.tsx";
+import WargaCatatanPage from "./pages/warga/CatatanPage.tsx";
+import WargaTiketPage from "./pages/warga/TiketDetailPage.tsx";
+import JuryPanel from "./components/jury/JuryPanel.jsx";
 
 function RouteThemeSync() {
   const { pathname } = useLocation();
@@ -44,7 +45,10 @@ function TopNav() {
     pathname === "/" ||
     pathname.startsWith("/peta") ||
     pathname.startsWith("/lapor") ||
+    pathname.startsWith("/tiket") ||
+    pathname.startsWith("/login") ||
     pathname.startsWith("/dinas") ||
+    pathname.startsWith("/catatan") ||
     pathname.startsWith("/rapor")
   ) {
     return null;
@@ -64,8 +68,8 @@ function TopNav() {
           <Link to="/" className="text-fg hover:text-brand">
             Peta
           </Link>
-          <Link to="/rapor" className="text-fg hover:text-brand">
-            Catatan Kerja
+          <Link to="/catatan" className="text-fg hover:text-brand">
+            Catatan
           </Link>
           <CitizenOnly>
             <Link to="/lapor" className="text-brand font-semibold">
@@ -105,17 +109,6 @@ function TopNav() {
   );
 }
 
-function PageShell({ title, subtitle }) {
-  return (
-    <main className="min-h-[calc(100vh-4rem)] bg-bg text-fg py-10 px-4 md:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-2">
-        <h1 className="font-head font-bold text-2xl md:text-3xl">{title}</h1>
-        <p className="text-fg-muted">{subtitle}</p>
-      </div>
-    </main>
-  );
-}
-
 function JuryPanelBridge() {
   const { switchJuryRole } = useAuth();
   return <JuryPanel onRoleChange={switchJuryRole} />;
@@ -133,17 +126,17 @@ export default function App() {
               <Route path="/" element={<WargaBerandaPage />} />
               <Route path="/peta" element={<WargaPetaPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/tiket/:id" element={<WargaTiketPage />} />
+              <Route path="/catatan" element={<WargaCatatanPage />} />
+              <Route path="/rapor" element={<Navigate to="/catatan" replace />} />
               <Route
-                path="/tiket/:id"
+                path="/lapor"
                 element={
-                  <PageShell
-                    title="Detail Tiket & Uji Publik"
-                    subtitle="Halaman publik detail laporan."
-                  />
+                  <CitizenOnly fallback={<Navigate to="/dinas" replace />}>
+                    <WargaLaporPage />
+                  </CitizenOnly>
                 }
               />
-              <Route path="/rapor" element={<WargaRaporPage />} />
-              <Route path="/lapor" element={<WargaLaporPage />} />
               <Route
                 path="/dinas"
                 element={
@@ -161,12 +154,16 @@ export default function App() {
                 }
               />
               <Route
-                path="/dinas/rapor"
+                path="/dinas/catatan"
                 element={
                   <RequireAuth allowedRoles={["ADMIN_DINAS"]}>
-                    <DinasRaporPage showSidebar />
+                    <DinasCatatanPage showSidebar />
                   </RequireAuth>
                 }
+              />
+              <Route
+                path="/dinas/rapor"
+                element={<Navigate to="/dinas/catatan" replace />}
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
