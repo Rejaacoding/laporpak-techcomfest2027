@@ -241,6 +241,47 @@ export async function seedDemoData(db, { resetOnlyDemo = false } = {}) {
       ) VALUES ${Prisma.join(ticketTuples)}
     `),
     db.auditLog.createMany({ data: auditRows }),
+    db.departmentRating.createMany({
+      data: [
+        {
+          id: "seed-rate-01",
+          ticketId: "seed-tkt-15",
+          departmentId: "DISHUB",
+          userId: "demo-warga-2",
+          stars: 5,
+          comment: "Lampu Taman Bungkul langsung menyala terang di malam yang sama.",
+          isDemoData: true,
+        },
+        {
+          id: "seed-rate-02",
+          ticketId: "seed-tkt-16",
+          departmentId: "DLH",
+          userId: "demo-warga-3",
+          stars: 4,
+          comment: "Evakuasi pohon tumbang cepat, sisa ranting juga dibersihkan rapi.",
+          isDemoData: true,
+        },
+        {
+          id: "seed-rate-03",
+          ticketId: "seed-tkt-17",
+          departmentId: "DPU",
+          userId: "demo-warga-4",
+          stars: 5,
+          comment: "Saluran air Candi tidak lagi menggenang saat hujan deras.",
+          isDemoData: true,
+        },
+        {
+          id: "seed-rate-04",
+          ticketId: "seed-tkt-28",
+          departmentId: "DISHUB",
+          userId: "demo-warga-validator",
+          stars: 4,
+          comment: "Kabel miring Wiyung sudah dirapikan petugas di hari yang sama.",
+          isDemoData: true,
+        },
+      ],
+      skipDuplicates: true,
+    }),
   ]);
 
   return {

@@ -204,6 +204,12 @@ export const validateTicket = (ticketId, body, token) =>
     token,
     body,
   });
+export const rateTicket = (ticketId, body, token) =>
+  apiRequest(`/tickets/${encodeURIComponent(ticketId)}/rate`, {
+    method: "POST",
+    token,
+    body,
+  });
 
 // 4. Meja Kerja Instansi ADMIN_DINAS (Antrean + 8 Aksi)
 export const listDinasTickets = (filters = {}, token) =>

@@ -15,7 +15,7 @@ async function upstashCommand(args) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(args),
-    signal: AbortSignal.timeout(3500),
+    signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) {
     throw new Error(`Upstash HTTP ${res.status}`);

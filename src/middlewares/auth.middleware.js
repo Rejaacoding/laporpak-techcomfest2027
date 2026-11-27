@@ -1,11 +1,13 @@
 import { prisma } from "../lib/prisma.js";
-import { generateAliasName, verifyJurySession } from "../lib/crypto.js";
+import { computeIpSubnetHash, generateAliasName, verifyJurySession } from "../lib/crypto.js";
 import { hasSupabaseConfig, verifySupabaseJwt } from "../lib/supabase.js";
 import { AppError } from "../lib/errors.js";
 
 export const JURY_ROLE_USER_MAP = {
   WARGA_PELAPOR: "demo-warga-pelapor",
   WARGA_VALIDATOR: "demo-warga-validator",
+  WARGA_VALIDATOR_2: "demo-warga-2",
+  WARGA_BARU: "demo-warga-baru",
   ADMIN_DISHUB: "demo-admin-dishub",
   ADMIN_DPU: "demo-admin-dpu",
   ADMIN_DLH: "demo-admin-dlh",
@@ -40,6 +42,8 @@ async function findOrProvisionSupabaseUser(sbUser) {
 export async function attachAuth(req, _res, next) {
   try {
     req.deviceFingerprint = String(req.header("x-device-fingerprint") || "fp-anonymous").slice(0, 128);
+    const forwardedIp = req.header("x-forwarded-for") || req.socket?.remoteAddress || req.ip || "";
+    req.ipSubnetHash = computeIpSubnetHash(forwardedIp);
     req.isJuryMode = false;
     req.jurySession = null;
     req.user = null;

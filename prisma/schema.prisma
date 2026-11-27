@@ -79,6 +79,7 @@ model Department {
 
   users   User[]
   tickets Ticket[]
+  ratings DepartmentRating[]
 }
 
 model User {
@@ -109,6 +110,7 @@ model User {
   tickets     Ticket[]           @relation("ReporterTickets")
   supports    TicketSupport[]
   validations TicketValidation[]
+  ratings     DepartmentRating[]
 
   @@index([role, departmentId])
   @@index([isDemoData])
@@ -136,6 +138,9 @@ model Ticket {
   afterPhotoKey        String?
   repairCapturedAt     DateTime?         @db.Timestamptz(3)
   repairDistanceMeters Int?
+  resolvedByUserId     String?
+  resolvedIpSubnet     String?
+  isFastResolveAnomaly Boolean           @default(false)
   beritaAcaraUrl       String?
   beritaAcaraKey       String?
   isNsfwPendingReview  Boolean           @default(false)
@@ -181,6 +186,7 @@ model Ticket {
   supports    TicketSupport[]
   validations TicketValidation[]
   auditLogs   AuditLog[]
+  ratings     DepartmentRating[]
 
   @@index([status, departmentId, slaDeadline])
   @@index([category, status])
@@ -206,10 +212,13 @@ model TicketValidation {
   ticketId          String
   validatorId       String
   validationRound   Int
-  type              ValidationType
-  weightAtVote      Float
-  deviceFingerprint String
-  evidencePhotoUrl  String?
+  type               ValidationType
+  weightAtVote       Float
+  effectiveWeight    Float?
+  deviceFingerprint  String
+  ipSubnetHash       String?
+  isCollusionSuspect Boolean        @default(false)
+  evidencePhotoUrl   String?
   evidencePhotoKey  String?
   gpsAccuracyMeters Float
   distanceMeters    Int
@@ -242,4 +251,23 @@ model AuditLog {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId, createdAt])
+}
+
+model DepartmentRating {
+  id           String   @id @default(cuid())
+  ticketId     String
+  departmentId String
+  userId       String
+  stars        Int
+  comment      String
+  isDemoData   Boolean  @default(false)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  ticket     Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@index([departmentId, createdAt])
+  @@index([isDemoData])
 }

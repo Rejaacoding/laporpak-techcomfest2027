@@ -91,6 +91,7 @@ export async function listDinasTickets({ departmentId, query }) {
     transferCount: t.transferCount,
     appealUsed: t.appealUsed,
     isChronicOverdue: t.isChronicOverdue,
+    isFastResolveAnomaly: t.isFastResolveAnomaly,
     isDemoData: t.isDemoData,
   }));
 }
@@ -312,6 +313,8 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
         const now = new Date();
         const remainingSlaMs = Math.max(0, new Date(ticket.slaDeadline).getTime() - now.getTime());
         const nextRound = ticket.validationStartedAt || ticket.disputeCount > 0 ? ticket.validationRound + 1 : 1;
+        const resolveDurationMinutes = (now.getTime() - new Date(ticket.syncedAt).getTime()) / 60000;
+        const isFastResolveAnomaly = resolveDurationMinutes < LIMITS.FAST_RESOLVE_ANOMALY_MINUTES;
 
         const updated = await tx.ticket.update({
           where: { id: ticket.id },
@@ -321,6 +324,9 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
             afterPhotoKey: uploadedAfter.key,
             repairCapturedAt: now,
             repairDistanceMeters: distM,
+            resolvedByUserId: officer.id,
+            resolvedIpSubnet: req.ipSubnetHash || null,
+            isFastResolveAnomaly: ticket.isFastResolveAnomaly || isFastResolveAnomaly,
             remainingSlaMs,
             validationStartedAt: now,
             validationRound: nextRound,
@@ -336,13 +342,16 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
           action: "DINAS_RESOLVE_SUBMITTED",
           fromStatus: ticket.status,
           toStatus: "PENDING_VALIDATION",
-          note: `Petugas mengunggah foto perbaikan (${distM} m dari titik laporan). Masuk masa Uji Publik 48–72 jam.`,
+          note: `Petugas mengunggah foto perbaikan (${distM} m dari titik laporan).${
+            isFastResolveAnomaly ? " [Anomali: selesai <10 menit — warga diimbau cek foto lebih teliti.]" : ""
+          } Masuk masa Uji Publik 48–72 jam.`,
         });
         return {
           id: updated.id,
           status: updated.status,
           repairDistanceMeters: distM,
           validationRound: nextRound,
+          isFastResolveAnomaly: updated.isFastResolveAnomaly,
         };
       }
 
@@ -404,6 +413,8 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
             afterPhotoKey: uploadedAfter.key,
             repairCapturedAt: now,
             repairDistanceMeters: distM,
+            resolvedByUserId: officer.id,
+            resolvedIpSubnet: req.ipSubnetHash || null,
             validationStartedAt: now,
             validationRound: nextRound,
             isAppealRound: true,
@@ -464,10 +475,8 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
           where: { ticketId: ticket.id, type: "DISPUTE_FALSE" },
           select: { validatorId: true },
         });
-        const rewardIds = new Set([ticket.reporterId, ...disputers.map((d) => d.validatorId)]);
-        for (const uid of rewardIds) {
-          await applyTrustReward(tx, uid);
-        }
+        const rewardIds = [...new Set([ticket.reporterId, ...disputers.map((d) => d.validatorId)])];
+        await Promise.all(rewardIds.map((uid) => applyTrustReward(tx, uid)));
 
         await appendAuditLog(tx, {
           ticketId: ticket.id,
@@ -489,7 +498,7 @@ export async function executeDinasAction({ req, ticketId, action, body }) {
       }
 
       throw new AppError(404, "NOT_FOUND", "Aksi dinas tidak dikenali.");
-    }, { maxWait: 5000, timeout: 15000 });
+    }, { maxWait: 10000, timeout: 30000 });
 
     // Hard-delete segera jika spam mengandung NSFW, atau pindah ke bucket privat 7 hari jika non-NSFW
     if (result.hardDeleteKey) {

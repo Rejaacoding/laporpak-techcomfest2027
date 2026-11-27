@@ -116,3 +116,12 @@ export const aktivasiMitraBodySchema = z.object({
   activationCode: z.string().trim().min(8, "Kode aktivasi tidak valid").max(40),
   aliasName: z.string().trim().min(3).max(50).optional(),
 });
+
+export const rateTicketBodySchema = z.object({
+  stars: z.coerce.number().int().min(1, "Rating minimal 1 bintang").max(5, "Rating maksimal 5 bintang"),
+  comment: z
+    .string()
+    .trim()
+    .min(5, "Alasan singkat minimal 5 karakter")
+    .max(200, "Alasan maksimal 200 karakter"),
+});

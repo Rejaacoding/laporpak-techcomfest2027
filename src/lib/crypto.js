@@ -37,6 +37,20 @@ export function computeActorPublicRef(actorId) {
   return crypto.createHmac("sha256", salt).update(String(actorId)).digest("hex");
 }
 
+export function computeIpSubnetHash(rawIp) {
+  const clean = String(rawIp || "").split(",")[0].trim().replace(/^::ffff:/i, "");
+  if (!clean) return null;
+  let subnet = clean;
+  if (clean.includes(".")) {
+    const parts = clean.split(".");
+    if (parts.length === 4) subnet = `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+  } else if (clean.includes(":")) {
+    subnet = clean.split(":").slice(0, 3).join(":") + "::/48";
+  }
+  const salt = requireSecret(["AUDIT_SALT", "AUDIT_ACTOR_SALT"], "dev_audit_actor_salt_fallback_0001");
+  return crypto.createHmac("sha256", salt).update(`subnet:${subnet}`).digest("hex").slice(0, 32);
+}
+
 export function computeAuditHash({ ticketId, actorPublicRef, action, timestampMs, prevHash }) {
   const secret = requireSecret(["SERVER_SECRET", "HMAC_SERVER_SECRET"], "dev_hmac_server_secret_fallback_0001");
   const payload = `${ticketId}||${actorPublicRef}||${action}||${String(timestampMs)}||${prevHash}`;
