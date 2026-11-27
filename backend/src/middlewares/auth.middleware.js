@@ -40,15 +40,23 @@ const ADMIN_USER_CACHE_TTL_MS = 60_000;
 const ADMIN_USER_REDIS_TTL_SECONDS = 60;
 const adminUserCache = new Map();
 
-function setAdminL1(user) {
+function setAdminL1(user, aliasIds = []) {
   const exp = Date.now() + ADMIN_USER_CACHE_TTL_MS;
   adminUserCache.set(`id:${user.id}`, { user, exp });
+  for (const aliasId of aliasIds) {
+    if (aliasId) adminUserCache.set(`id:${aliasId}`, { user, exp });
+  }
   if (user.email) adminUserCache.set(`email:${user.email.toLowerCase()}`, { user, exp });
 }
 
-async function cacheAdminUser(user) {
-  setAdminL1(user);
+async function cacheAdminUser(user, aliasIds = []) {
+  setAdminL1(user, aliasIds);
   const writes = [redis.safeSetJson(`cache:admin:id:${user.id}`, user, ADMIN_USER_REDIS_TTL_SECONDS)];
+  for (const aliasId of aliasIds) {
+    if (aliasId && aliasId !== user.id) {
+      writes.push(redis.safeSetJson(`cache:admin:id:${aliasId}`, user, ADMIN_USER_REDIS_TTL_SECONDS));
+    }
+  }
   if (user.email) {
     writes.push(
       redis.safeSetJson(
@@ -95,10 +103,13 @@ async function findOrProvisionSupabaseUser(sbUser) {
     const emailCacheKey = `email:${email.toLowerCase()}`;
     if (emailVerified) {
       const hit = adminUserCache.get(emailCacheKey);
-      if (hit && Date.now() < hit.exp) return hit.user;
+      if (hit && Date.now() < hit.exp) {
+        await cacheAdminUser(hit.user, [sbUser.id]);
+        return hit.user;
+      }
       const redisHit = await redis.safeGetJson(`cache:admin:${emailCacheKey}`);
       if (redisHit?.role === "ADMIN_DINAS") {
-        setAdminL1(redisHit);
+        await cacheAdminUser(redisHit, [sbUser.id]);
         return redisHit;
       }
     }
@@ -108,7 +119,7 @@ async function findOrProvisionSupabaseUser(sbUser) {
     });
     if (byEmail) {
       if (emailVerified && byEmail.role === "ADMIN_DINAS") {
-        await cacheAdminUser(byEmail);
+        await cacheAdminUser(byEmail, [sbUser.id]);
         return byEmail;
       }
       throw new AppError(

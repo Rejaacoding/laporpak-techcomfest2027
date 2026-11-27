@@ -60,7 +60,35 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api/|assets/|samples/|geo/|mascots/|.*\\.).*)",
+      "source": "/peta",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/tiket/:id",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/catatan",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/rapor",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/lapor",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dinas",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dinas/:path*",
       "destination": "/index.html"
     }
   ]
