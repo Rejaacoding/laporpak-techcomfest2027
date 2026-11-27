@@ -32,8 +32,24 @@ const TOAST_STYLES = {
   },
 };
 
+/**
+ * @typedef {Object} ShowToastOptions
+ * @property {"success"|"warning"|"error"|"info"} [type]
+ * @property {string} [title]
+ * @property {string} [message]
+ * @property {unknown} [error]
+ * @property {number} [duration]
+ */
+
+/**
+ * @typedef {Object} ToastContextValue
+ * @property {(options: ShowToastOptions) => string} showToast
+ * @property {(id: string) => void} dismissToast
+ */
+
+/** @type {import("react").Context<ToastContextValue>} */
 const ToastContext = createContext({
-  showToast: () => {},
+  showToast: () => "",
   dismissToast: () => {},
 });
 
@@ -56,6 +72,7 @@ export function ToastProvider({ children }) {
   }, []);
 
   const showToast = useCallback(
+    /** @type {(options: ShowToastOptions) => string} */
     ({ type = "info", title, message, error, duration = 5000 }) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const payload = buildToastPayload({ type, title, message, error });

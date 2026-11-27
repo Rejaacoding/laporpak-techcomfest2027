@@ -36,7 +36,7 @@ export default function LiveCameraCapture({
   publicLng,
   categoryCode = 'JALAN_BERLUBANG',
   onCapture,
-  onCaptureSuccess,
+  onCaptureSuccess = null,
 }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);

@@ -10,6 +10,7 @@
     "start": "node api/index.js",
     "build": "npx prisma generate && npm --prefix frontend install --include=dev && npm --prefix frontend run build && node -e \"const fs=require('fs'); for (const d of ['samples','geo','mascots']) { if (fs.existsSync('public/'+d)) fs.cpSync('public/'+d, 'frontend/dist/'+d, { recursive: true }); }\"",
     "build:client": "npm --prefix frontend run build",
+    "typecheck": "npm --prefix frontend run typecheck",
     "db:generate": "npx prisma generate",
     "db:migrate": "npx prisma migrate deploy",
     "db:seed": "node prisma/seed.js",

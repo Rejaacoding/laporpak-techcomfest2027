@@ -188,7 +188,8 @@ export const getRapor = (filters = {}) =>
   apiRequest(`/rapor${toQueryString(filters)}`);
 
 // 3. Aksi Warga & Kamera
-export const issueCaptureNonce = ({ actionType, ticketId }, token) =>
+/** @type {(options: { actionType: string, ticketId?: string | null }, token?: string | null) => Promise<any>} */
+export const issueCaptureNonce = ({ actionType, ticketId = null }, token) =>
   apiRequest("/capture-nonce", {
     method: "POST",
     token,
