@@ -37,21 +37,27 @@ async function findOrProvisionSupabaseUser(sbUser) {
   const existingById = await getUserCachedIfAdmin({ id: sbUser.id });
   if (existingById) return existingById;
 
-  if (sbUser.email) {
-    const existingByEmail = await getUserCachedIfAdmin({ email: sbUser.email });
-    if (existingByEmail) return existingByEmail;
-  }
-
   const email = String(sbUser.email || "").trim();
   const emailVerified =
     Boolean(sbUser.email_confirmed_at || sbUser.confirmed_at) ||
     sbUser.app_metadata?.provider === "google";
   if (email) {
+    const emailCacheKey = `email:${email.toLowerCase()}`;
+    if (emailVerified) {
+      const hit = adminUserCache.get(emailCacheKey);
+      if (hit && Date.now() < hit.exp) return hit.user;
+    }
+
     const byEmail = await prisma.user.findFirst({
       where: { email: { equals: email, mode: "insensitive" } },
     });
     if (byEmail) {
-      if (emailVerified && byEmail.role === "ADMIN_DINAS") return byEmail;
+      if (emailVerified && byEmail.role === "ADMIN_DINAS") {
+        const exp = Date.now() + ADMIN_USER_CACHE_TTL_MS;
+        adminUserCache.set(`id:${byEmail.id}`, { user: byEmail, exp });
+        adminUserCache.set(emailCacheKey, { user: byEmail, exp });
+        return byEmail;
+      }
       throw new AppError(
         403,
         "FORBIDDEN",

@@ -16,7 +16,6 @@ import {
   useToast,
 } from "../../components/ui/index.js";
 import {
-  getTicketDetail,
   getTicketMediaSignedUrl,
   listTickets,
   onJuryEvent,
@@ -37,13 +36,6 @@ const SLA_CHIP_CLASS: Record<WargaMapPinView["slaTone"], string> = {
   muted: "bg-surface-2 text-fg-muted",
 };
 
-interface TicketDetailView {
-  beforePhotoUrl: string | null;
-  isNsfwPendingReview: boolean;
-  isLowQualityOverride: boolean;
-  description: string;
-}
-
 interface UserCoords {
   lat: number;
   lng: number;
@@ -54,7 +46,7 @@ interface UserCoords {
  */
 export function WargaBerandaPage() {
   const navigate = useNavigate();
-  const { user, accessToken } = useAuth();
+  const { accessToken } = useAuth();
   const { showToast } = useToast();
 
   const [tickets, setTickets] = useState<WargaMapPinView[]>([]);
@@ -63,7 +55,6 @@ export function WargaBerandaPage() {
   const [activeCategory, setActiveCategory] = useState<string>("Semua");
   const [revealedPhotos, setRevealedPhotos] = useState<Record<string, string>>({});
   const [revealingId, setRevealingId] = useState<string | null>(null);
-  const [details, setDetails] = useState<Record<string, TicketDetailView>>({});
   const [userCoords, setUserCoords] = useState<UserCoords | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
 
@@ -146,47 +137,6 @@ export function WargaBerandaPage() {
     return { active, pending, resolved };
   }, [tickets]);
 
-  const topIdsKey = visiblePins
-    .slice(0, 3)
-    .map((ticket) => ticket.id)
-    .join("|");
-
-  useEffect(() => {
-    if (!topIdsKey) return undefined;
-    let cancelled = false;
-    const ids = topIdsKey.split("|");
-    Promise.all(
-      ids.map(async (id) => {
-        try {
-          const detail = await getTicketDetail(id, {}, accessToken);
-          return [
-            id,
-            {
-              beforePhotoUrl: detail?.beforePhotoUrl || null,
-              isNsfwPendingReview: Boolean(detail?.isNsfwPendingReview),
-              isLowQualityOverride: Boolean(detail?.isLowQualityOverride),
-              description: detail?.description || "",
-            },
-          ] as const;
-        } catch {
-          return null;
-        }
-      })
-    ).then((rows) => {
-      if (cancelled) return;
-      setDetails((prev) => {
-        const next = { ...prev };
-        for (const row of rows) {
-          if (row) next[row[0]] = row[1];
-        }
-        return next;
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [topIdsKey, accessToken]);
-
   const clusters = useMemo(() => {
     if (visiblePins.length === 0) return [];
     const mapped = mapRaporResponse({
@@ -240,20 +190,6 @@ export function WargaBerandaPage() {
     );
   }, [showToast]);
 
-  const handleProfileClick = () => {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
-    showToast({
-      type: "info",
-      title: user.aliasName,
-      message: `Trust Score ${Number(user.trustScore ?? 0).toFixed(1)} · ${
-        user.activeTicketCount ?? 0
-      } laporan aktif.`,
-    });
-  };
-
   const handleRevealPhoto = async (
     event: React.MouseEvent,
     ticket: WargaMapPinView
@@ -274,10 +210,10 @@ export function WargaBerandaPage() {
   return (
     <div className="min-h-screen bg-bg text-fg flex flex-col pb-24 md:pb-10">
       <div className="hidden md:block">
-        <TopNavbar onProfileClick={handleProfileClick} />
+        <TopNavbar />
       </div>
       <div className="md:hidden">
-        <Header onProfileClick={handleProfileClick} />
+        <Header />
       </div>
 
       <main className="max-w-7xl w-full mx-auto px-4 md:px-6 lg:px-8 py-4 md:py-8 flex flex-col gap-5 md:gap-7">
@@ -471,10 +407,9 @@ export function WargaBerandaPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {visiblePins.slice(0, 9).map((ticket) => {
-                const detail = details[ticket.id];
-                const isNsfw = detail?.isNsfwPendingReview ?? ticket.isNsfwPendingReview;
+                const isNsfw = Boolean(ticket.isNsfwPendingReview);
                 const revealedUrl = revealedPhotos[ticket.id];
-                const photoUrl = revealedUrl || detail?.beforePhotoUrl;
+                const photoUrl = revealedUrl || ticket.beforePhotoUrl || null;
                 const showBlur = Boolean(isNsfw && !revealedUrl);
 
                 return (
@@ -564,7 +499,7 @@ export function WargaBerandaPage() {
         </section>
       </main>
 
-      <BottomNavbar activeTab="beranda" onProfileClick={handleProfileClick} />
+      <BottomNavbar activeTab="beranda" />
     </div>
   );
 }

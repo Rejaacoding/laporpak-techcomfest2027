@@ -13,6 +13,7 @@ import {
 } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.tsx";
 import { CitizenOnly, RequireAuth } from "./components/auth/index.ts";
+import { ProfileDrawer } from "./components/layout/ProfileDrawer.tsx";
 import { ToastProvider } from "./components/ui/index.js";
 import LoginPage from "./pages/auth/LoginPage.tsx";
 import DinasDashboardPage from "./pages/dinas/DashboardPage.tsx";
@@ -93,6 +94,7 @@ export default function App() {
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            <ProfileDrawer />
             <JuryPanelBridge />
           </AuthProvider>
         </ToastProvider>

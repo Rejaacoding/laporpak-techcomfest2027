@@ -370,10 +370,16 @@ export function WargaTiketPage() {
       const result = await validateTicket(detail.id, body, accessToken);
       showToast({
         type: "success",
-        title: result?.closed ? "Laporan tuntas" : "Suara 'Sudah Beres' tercatat",
+        title: result?.closed
+          ? "Laporan tuntas"
+          : result?.coolingHold
+            ? "Kuorum tercapai (masa tayang 6 jam)"
+            : "Suara 'Sudah Beres' tercatat",
         message: result?.closed
           ? "Kuorum warga terpenuhi. Terima kasih sudah menjaga fasilitas publik."
-          : `Kuorum sementara ${result?.quorumWeight ?? 0} / ${quorum?.targetWeight ?? 2} poin.`,
+          : result?.coolingHold
+            ? "Suara warga sudah cukup — laporan menunggu masa tayang publik 6 jam sebelum dikunci agar transparan."
+            : `Kuorum sementara ${result?.quorumWeight ?? 0} / ${result?.targetWeight ?? quorum?.targetWeight ?? 2} poin.`,
       });
       await loadDetail();
     } catch (err) {
@@ -708,6 +714,19 @@ export function WargaTiketPage() {
               aria-label="Geser perbandingan foto sebelum dan sesudah"
               className="w-full accent-brand"
             />
+          )}
+
+          {showBeforeBlur && afterSrc && (
+            <div className="flex flex-col gap-1.5">
+              <span className="font-mono text-[11px] font-semibold text-brand">
+                Foto Sesudah Perbaikan (Tetap Dapat Diperiksa)
+              </span>
+              <img
+                src={afterSrc}
+                alt="Foto kondisi sesudah perbaikan"
+                className="aspect-video w-full rounded-xl object-cover border border-line"
+              />
+            </div>
           )}
 
           {!afterSrc && (

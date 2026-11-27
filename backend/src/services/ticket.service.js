@@ -48,6 +48,8 @@ function formatTicketPin(t) {
     statusLabel: TICKET_STATUSES[t.status]?.label || t.status,
     publicLat: t.publicLat,
     publicLng: t.publicLng,
+    beforePhotoUrl: t.isNsfwPendingReview ? null : t.beforePhotoUrl,
+    isNsfwPendingReview: Boolean(t.isNsfwPendingReview),
     slaDeadline: t.slaDeadline,
     remainingSlaMs: t.remainingSlaMs,
     supportCount: t.supportCount,

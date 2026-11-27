@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Camera, CheckCircle2, LocateFixed, MapPin, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, FileText, LocateFixed, MapPin, Upload } from "lucide-react";
 import { Button, Modal, Textarea, useToast } from "../ui/index.js";
 import {
   executeDinasAction,
@@ -48,7 +48,7 @@ export interface DinasActionModalProps {
   accessToken?: string | null;
   isJuryMode?: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (serverData?: Record<string, unknown> | null) => void;
 }
 
 /**
@@ -61,6 +61,7 @@ export function DinasActionModal({
   action,
   currentDepartmentId,
   accessToken,
+  isJuryMode = false,
   onClose,
   onSuccess,
 }: DinasActionModalProps) {
@@ -82,6 +83,11 @@ export function DinasActionModal({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const prewarmedNonceRef = useRef<{
+    key: string;
+    nonce: string;
+    expiresAt: number;
+  } | null>(null);
 
   const actionId = action?.id ?? null;
   const photoAction = actionId ? Boolean(PHOTO_ACTION_TYPES[actionId]) : false;
@@ -98,15 +104,50 @@ export function DinasActionModal({
     setAgency(OUT_OF_SCOPE_OPTIONS[0].code);
     setIsNsfwContent(false);
     setNote("");
-    setLat(null);
-    setLng(null);
-    setGpsAccuracyMeters(null);
+    if (
+      isJuryMode &&
+      photoAction &&
+      ticket?.publicLat != null &&
+      ticket?.publicLng != null
+    ) {
+      setLat(Number(ticket.publicLat));
+      setLng(Number(ticket.publicLng));
+      setGpsAccuracyMeters(10);
+    } else {
+      setLat(null);
+      setLng(null);
+      setGpsAccuracyMeters(null);
+    }
     setPhotoBase64(null);
     setClientNsfwScore(0);
     setBeritaAcaraBase64(null);
     setBeritaAcaraFilename("");
     setFormError("");
-  }, [open, ticket?.id, actionId, currentDepartmentId]);
+
+    if (photoAction && ticket?.id && actionId) {
+      const actionType = PHOTO_ACTION_TYPES[actionId];
+      const cacheKey = `${ticket.id}:${actionType}`;
+      if (
+        actionType &&
+        (!prewarmedNonceRef.current ||
+          prewarmedNonceRef.current.key !== cacheKey ||
+          Date.now() >= prewarmedNonceRef.current.expiresAt)
+      ) {
+        issueCaptureNonce({ actionType, ticketId: ticket.id }, accessToken)
+          .then((res) => {
+            const nonce = res?.captureNonce || res?.nonce;
+            if (nonce) {
+              prewarmedNonceRef.current = {
+                key: cacheKey,
+                nonce,
+                expiresAt: Date.now() + 240_000,
+              };
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [open, ticket?.id, ticket?.publicLat, ticket?.publicLng, actionId, photoAction, isJuryMode, currentDepartmentId, accessToken]);
 
   const requestGps = useCallback(() => {
     if (!navigator.geolocation) {
@@ -218,6 +259,18 @@ export function DinasActionModal({
     reader.readAsDataURL(file);
   };
 
+  const handleUseDemoBeritaAcara = async () => {
+    setFormError("");
+    try {
+      const b64 = await fetchSampleAsBase64("/samples/berita-acara-sample.pdf");
+      setBeritaAcaraBase64(b64);
+      setBeritaAcaraFilename("berita-acara-sample.pdf");
+      showToast({ type: "success", message: "Sampel PDF Berita Acara siap diunggah." });
+    } catch (err) {
+      setFormError(humanizeError(err));
+    }
+  };
+
   const handleSubmit = async () => {
     setFormError("");
     const body: Record<string, unknown> = {};
@@ -274,11 +327,22 @@ export function DinasActionModal({
     try {
       if (photoAction) {
         const actionType = PHOTO_ACTION_TYPES[action.id];
-        const nonce = await issueCaptureNonce(
-          { actionType, ticketId: ticket.id },
-          accessToken
-        );
-        const captureNonce = nonce?.captureNonce || nonce?.nonce;
+        const cacheKey = `${ticket.id}:${actionType}`;
+        let captureNonce: string | undefined;
+        if (
+          prewarmedNonceRef.current &&
+          prewarmedNonceRef.current.key === cacheKey &&
+          Date.now() < prewarmedNonceRef.current.expiresAt
+        ) {
+          captureNonce = prewarmedNonceRef.current.nonce;
+          prewarmedNonceRef.current = null;
+        } else {
+          const nonce = await issueCaptureNonce(
+            { actionType, ticketId: ticket.id },
+            accessToken
+          );
+          captureNonce = nonce?.captureNonce || nonce?.nonce;
+        }
         if (!captureNonce) {
           throw new Error("Kupon kamera tidak diterima. Silakan muat ulang lalu coba lagi.");
         }
@@ -295,13 +359,13 @@ export function DinasActionModal({
         }
       }
 
-      await executeDinasAction(ticket.id, action.id, body, accessToken);
+      const serverData = await executeDinasAction(ticket.id, action.id, body, accessToken);
       showToast({
         type: "success",
         title: `${action.label} berhasil`,
         message: `${ticket.displayCode} · ${ticket.categoryTitle} sudah diperbarui.`,
       });
-      onSuccess();
+      onSuccess(serverData);
       onClose();
     } catch (err) {
       const message = humanizeError(err);
@@ -316,11 +380,35 @@ export function DinasActionModal({
     <>
       <Modal
         open={open}
-        onClose={onClose}
+        onClose={() => !submitting && onClose()}
         title={`${action.label} — ${ticket.displayCode}`}
         description={`${ticket.categoryTitle} · ${ticket.location}`}
       >
         <div className="flex flex-col gap-4">
+          {(ticket.beforePhotoUrl || ticket.description || ticket.isNsfwPendingReview) && (
+            <div className="rounded-xl border border-line bg-surface-2/60 p-3 flex flex-col sm:flex-row gap-3">
+              {ticket.isNsfwPendingReview ? (
+                <div className="sm:w-28 h-20 rounded-lg border border-amber-300 bg-amber-50 flex items-center justify-center px-2 text-center text-[11px] font-medium text-amber-900 shrink-0">
+                  Foto ditahan (tinjauan NSFW)
+                </div>
+              ) : ticket.beforePhotoUrl ? (
+                <img
+                  src={ticket.beforePhotoUrl}
+                  alt={`Foto bukti awal ${ticket.displayCode}`}
+                  className="sm:w-28 h-20 rounded-lg object-cover border border-line shrink-0"
+                />
+              ) : null}
+              <div className="min-w-0 space-y-1 text-xs">
+                <p className="font-semibold text-fg">
+                  Bukti Awal Pelapor ({ticket.reporterAlias})
+                </p>
+                {ticket.description && (
+                  <p className="text-fg-muted line-clamp-3">{ticket.description}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           <p className="font-sans text-sm text-fg-muted">
             Tindakan ini dicatat ke rantai audit kriptografi dan langsung
             memperbarui antrean dinas.
@@ -504,6 +592,17 @@ export function DinasActionModal({
                     onChange={handleBeritaAcaraFile}
                     className="block w-full text-xs text-fg file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-3 file:py-2 file:font-head file:text-xs file:font-semibold file:text-brand-fg hover:file:brightness-110"
                   />
+                  {isJuryMode && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<FileText className="size-3.5" />}
+                      onClick={handleUseDemoBeritaAcara}
+                      className="self-start mt-1"
+                    >
+                      Pakai Sampel PDF Berita Acara (Demo Juri)
+                    </Button>
+                  )}
                   {beritaAcaraBase64 && (
                     <span className="inline-flex items-center gap-1 text-xs font-medium text-green-800">
                       <Upload className="size-3.5" aria-hidden="true" />
@@ -534,7 +633,7 @@ export function DinasActionModal({
           )}
 
           <div className="flex items-center justify-end gap-2.5 pt-2">
-            <Button variant="secondary" size="md" onClick={onClose}>
+            <Button variant="secondary" size="md" disabled={submitting} onClick={onClose}>
               Batal
             </Button>
             <Button

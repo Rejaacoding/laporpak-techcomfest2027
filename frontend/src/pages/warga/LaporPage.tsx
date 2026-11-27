@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -112,6 +112,31 @@ export function WargaLaporPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [createdTicketId, setCreatedTicketId] = useState<string | null>(null);
+  const prewarmedCreateNonceRef = useRef<{
+    nonce: string;
+    expiresAt: number;
+  } | null>(null);
+
+  const prewarmCreateNonce = useCallback(() => {
+    if (!user && !isJuryMode) return;
+    if (
+      prewarmedCreateNonceRef.current &&
+      Date.now() < prewarmedCreateNonceRef.current.expiresAt
+    ) {
+      return;
+    }
+    issueCaptureNonce({ actionType: "CREATE_TICKET" }, accessToken)
+      .then((res) => {
+        const nonce = res?.captureNonce || res?.nonce;
+        if (nonce) {
+          prewarmedCreateNonceRef.current = {
+            nonce,
+            expiresAt: Date.now() + 240_000,
+          };
+        }
+      })
+      .catch(() => {});
+  }, [user, isJuryMode, accessToken]);
 
   useEffect(() => {
     saveLaporDraft(draft);
@@ -166,6 +191,7 @@ export function WargaLaporPage() {
             ...prev,
             photoBase64,
             isLowQualityOverride: false,
+            clientNsfwScore: 0,
             ...(Number.isFinite(Number(detail.lat)) && Number.isFinite(Number(detail.lng))
               ? {
                   lat: Number(Number(detail.lat).toFixed(6)),
@@ -174,6 +200,7 @@ export function WargaLaporPage() {
                 }
               : {}),
           }));
+          prewarmCreateNonce();
           showToast({ type: "success", message: "Foto sampel simulasi juri siap dikirim." });
         } catch (err) {
           showToast({ type: "error", error: err });
@@ -334,11 +361,20 @@ export function WargaLaporPage() {
 
     setSubmitting(true);
     try {
-      const nonce = await issueCaptureNonce(
-        { actionType: "CREATE_TICKET" },
-        accessToken
-      );
-      const captureNonce = nonce?.captureNonce || nonce?.nonce;
+      let captureNonce: string | undefined;
+      if (
+        prewarmedCreateNonceRef.current &&
+        Date.now() < prewarmedCreateNonceRef.current.expiresAt
+      ) {
+        captureNonce = prewarmedCreateNonceRef.current.nonce;
+        prewarmedCreateNonceRef.current = null;
+      } else {
+        const nonce = await issueCaptureNonce(
+          { actionType: "CREATE_TICKET" },
+          accessToken
+        );
+        captureNonce = nonce?.captureNonce || nonce?.nonce;
+      }
       if (!captureNonce) {
         throw new Error("Kupon foto tidak diterima. Silakan ambil foto ulang.");
       }
@@ -790,6 +826,7 @@ export function WargaLaporPage() {
             isLowQualityOverride: Boolean(isLowQualityOverride),
             clientNsfwScore: Number(clientNsfwScore ?? 0),
           }));
+          prewarmCreateNonce();
           setCameraOpen(false);
         }}
       />

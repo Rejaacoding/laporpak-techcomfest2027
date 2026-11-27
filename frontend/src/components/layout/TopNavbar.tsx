@@ -3,6 +3,7 @@ import { LogOut, MapPin, User } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
 import { CitizenOnly } from "../auth/index.ts";
 import { Button } from "../ui/index.js";
+import { openProfileDrawer } from "./ProfileDrawer.tsx";
 
 export interface TopNavbarNavItem {
   to: string;
@@ -127,16 +128,9 @@ export function TopNavbar({
             <>
               <button
                 type="button"
-                onClick={onProfileClick}
-                disabled={!onProfileClick}
+                onClick={onProfileClick || openProfileDrawer}
                 aria-label={`Profil aktif: ${resolvedProfileLabel}`}
-                className={[
-                  "inline-flex items-center gap-2 h-10 pl-2 pr-3 py-1.5 rounded-full",
-                  "bg-surface border border-line text-fg",
-                  onProfileClick
-                    ? "cursor-pointer hover:bg-surface-2 transition duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-                    : "cursor-default",
-                ].join(" ")}
+                className="inline-flex items-center gap-2 h-10 pl-2 pr-3 py-1.5 rounded-full bg-surface border border-line text-fg cursor-pointer hover:bg-surface-2 transition duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
               >
                 <span
                   className="size-[26px] rounded-full bg-brand text-brand-fg flex items-center justify-center shrink-0"

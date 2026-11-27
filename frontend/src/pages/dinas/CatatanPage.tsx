@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronDown,
@@ -45,14 +46,13 @@ const FORMULA_TEXT =
  * Catatan (/dinas/catatan) — live `GET /api/rapor` board, filters and matrix.
  */
 export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) {
+  const navigate = useNavigate();
   const { user, accessToken } = useAuth();
   const { showToast } = useToast();
 
   const [apiRapor, setApiRapor] = useState<ApiRaporResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [sidebarFilter, setSidebarFilter] =
-    useState<DinasQueueFilterKey>("ALL");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [selectedRegion, setSelectedRegion] = useState("ALL");
   const [queueCounts, setQueueCounts] = useState(
@@ -64,10 +64,15 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
     setError(null);
     try {
       const filters = selectedCategory === "ALL" ? {} : { category: selectedCategory };
-      const raporPayload = await getRapor(filters);
+      const shouldLoadQueue = showSidebar && user?.role === "ADMIN_DINAS";
+      const [raporPayload, tickets] = await Promise.all([
+        getRapor(filters),
+        shouldLoadQueue
+          ? listDinasTickets({}, accessToken).catch(() => null)
+          : Promise.resolve(null),
+      ]);
       setApiRapor(raporPayload);
-      if (showSidebar && user?.role === "ADMIN_DINAS") {
-        const tickets = await listDinasTickets({}, accessToken);
+      if (Array.isArray(tickets)) {
         setQueueCounts(computeDinasQueueCounts(tickets));
       }
     } catch (err) {
@@ -158,8 +163,10 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
             regionLabel="Kota Surabaya & Kab. Sidoarjo"
             isVerifiedPartner
             integrityScore={myScore}
-            activeFilter={sidebarFilter}
-            onFilterChange={setSidebarFilter}
+            activeFilter="ALL"
+            onFilterChange={(next: DinasQueueFilterKey) =>
+              navigate(next === "ALL" ? "/dinas" : `/dinas?status=${next}`)
+            }
             counts={queueCounts}
           />
         )}

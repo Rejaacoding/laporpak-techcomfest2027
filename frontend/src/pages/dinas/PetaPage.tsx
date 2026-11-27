@@ -164,7 +164,11 @@ export function DinasPetaPage() {
   const visiblePins = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return pins.filter((pin) => {
-      if (activeFilter !== "ALL" && pin.status !== activeFilter) return false;
+      if (activeFilter === "CLOSED") {
+        if (pin.status !== "CLOSED" && pin.status !== "AUTO_CLOSED") return false;
+      } else if (activeFilter !== "ALL" && pin.status !== activeFilter) {
+        return false;
+      }
       if (categoryFilter !== "ALL" && pin.category !== categoryFilter) return false;
       if (!query) return true;
       return (

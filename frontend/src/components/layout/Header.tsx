@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { MapPin } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
 import { Button } from "../ui/index.js";
+import { openProfileDrawer } from "./ProfileDrawer.tsx";
 
 export interface HeaderProps {
   /** Teks wilayah layanan di bawah logo */
@@ -74,15 +75,9 @@ export function Header({
       {resolvedAlias ? (
         <button
           type="button"
-          onClick={onProfileClick}
+          onClick={onProfileClick || openProfileDrawer}
           aria-label={`Buka profil warga ${resolvedAlias}`}
-          className={[
-            "inline-flex items-center gap-1.5 rounded-full bg-surface-2 border border-line",
-            "px-2.5 py-[5px] text-fg shrink-0",
-            "transition duration-150 ease-out motion-reduce:transition-none",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-            onProfileClick ? "cursor-pointer hover:border-brand/60" : "cursor-default",
-          ].join(" ")}
+          className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 border border-line px-2.5 py-[5px] text-fg shrink-0 transition duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer hover:border-brand/60"
         >
           <span
             className="size-[7px] rounded-full bg-brand shrink-0"

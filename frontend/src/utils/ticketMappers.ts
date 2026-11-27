@@ -65,6 +65,7 @@ export interface ApiPublicTicket {
   supportCount?: number;
   isChronicOverdue?: boolean;
   isDemoData?: boolean;
+  beforePhotoUrl?: string | null;
   isNsfwPendingReview?: boolean;
   createdAt?: string | null;
   department?: { id?: string; code?: string; shortName?: string } | null;
@@ -114,7 +115,9 @@ export interface DinasTicketViewRow {
   isFastResolveAnomaly: boolean;
   isDemoData: boolean;
   description: string;
+  beforePhotoUrl: string | null;
   afterPhotoUrl: string | null;
+  isNsfwPendingReview: boolean;
   isLowQualityOverride: boolean;
 }
 
@@ -134,6 +137,7 @@ export interface WargaFeedTicketView {
   departmentLabel: string;
   publicLat: number | null;
   publicLng: number | null;
+  beforePhotoUrl?: string | null;
   isNsfwPendingReview?: boolean;
 }
 
@@ -508,7 +512,9 @@ export function computeDinasQueueCounts(
   };
   for (const ticket of tickets) {
     const status = String(ticket.status || "").toUpperCase();
-    if (status in counts && status !== "ALL") {
+    if (status === "AUTO_CLOSED") {
+      counts.CLOSED += 1;
+    } else if (status in counts && status !== "ALL") {
       counts[status as keyof typeof counts] += 1;
     }
   }
@@ -568,7 +574,9 @@ export function mapDinasTicketsToRows(
       isFastResolveAnomaly: Boolean(ticket.isFastResolveAnomaly),
       isDemoData: Boolean(ticket.isDemoData),
       description: ticket.description || "",
+      beforePhotoUrl: ticket.isNsfwPendingReview ? null : ticket.beforePhotoUrl || null,
       afterPhotoUrl: ticket.afterPhotoUrl || null,
+      isNsfwPendingReview: Boolean(ticket.isNsfwPendingReview),
       isLowQualityOverride: Boolean(ticket.isLowQualityOverride),
     };
   });
@@ -601,6 +609,7 @@ function mapPublicTicket(
     departmentLabel: ticket.department?.shortName || ticket.department?.code || "Dinas terkait",
     publicLat: lat,
     publicLng: lng,
+    beforePhotoUrl: ticket.isNsfwPendingReview ? null : ticket.beforePhotoUrl || null,
     isNsfwPendingReview: Boolean(ticket.isNsfwPendingReview),
   };
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Filter, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Filter, RefreshCw, Search } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
 import { TopNavbar, DinasSidebar } from "../../components/layout/index.ts";
 import type { DinasQueueFilterKey } from "../../components/layout/index.ts";
@@ -11,27 +12,39 @@ import {
 } from "../../components/dinas/index.ts";
 import { Button, Input, Skeleton, useToast } from "../../components/ui/index.js";
 import {
+  executeDinasAction,
   getRapor,
   listDinasTickets,
   onJuryEvent,
 } from "../../services/api.js";
 import {
+  buildDinasTicketActions,
   computeDinasQueueCounts,
   mapDinasTicketsToRows,
   mapRaporResponse,
 } from "../../utils/ticketMappers.ts";
 import type {
+  ApiDinasTicket,
   DinasActionId,
   DinasTicketViewRow,
   KpiStatItem,
   RaporViewModel,
   TicketActionItem,
+  TicketStatusCode,
 } from "../../utils/ticketMappers.ts";
 import { TICKET_STATUSES } from "../../constants/designTokens.js";
 
 type RegionFilter = "ALL" | "Surabaya" | "Sidoarjo";
 
 const REGION_CYCLE: RegionFilter[] = ["ALL", "Surabaya", "Sidoarjo"];
+const VALID_STATUS_FILTERS: DinasQueueFilterKey[] = [
+  "ALL",
+  "OVERDUE",
+  "DISPUTED",
+  "ESCALATED",
+  "PENDING_VALIDATION",
+  "CLOSED",
+];
 
 /**
  * Dashboard Dinas (/dinas) — live queue, alerts, KPI and 8 mutation actions.
@@ -39,37 +52,63 @@ const REGION_CYCLE: RegionFilter[] = ["ALL", "Surabaya", "Sidoarjo"];
 export function DinasDashboardPage() {
   const { user, accessToken, isJuryMode } = useAuth();
   const { showToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [rows, setRows] = useState<DinasTicketViewRow[]>([]);
+  const initialStatus = searchParams.get("status") as DinasQueueFilterKey | null;
+  const [rawTickets, setRawTickets] = useState<ApiDinasTicket[]>([]);
   const [rapor, setRapor] = useState<RaporViewModel | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [activeFilter, setActiveFilter] = useState<DinasQueueFilterKey>("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<DinasQueueFilterKey>(
+    initialStatus && VALID_STATUS_FILTERS.includes(initialStatus)
+      ? initialStatus
+      : "ALL"
+  );
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
   const [regionFilter, setRegionFilter] = useState<RegionFilter>("ALL");
   const [selectedAction, setSelectedAction] = useState<{
     ticket: DinasTicketViewRow;
     action: TicketActionItem;
   } | null>(null);
 
-  const loadData = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [ticketPayload, raporPayload] = await Promise.all([
-        listDinasTickets({}, accessToken),
-        getRapor(),
-      ]);
-      setRows(mapDinasTicketsToRows(ticketPayload));
-      setRapor(mapRaporResponse(raporPayload));
-    } catch (err) {
-      setError(err);
-      showToast({ type: "error", error: err });
-    } finally {
-      setLoading(false);
-    }
-  }, [user, accessToken, showToast]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const loadData = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!user) return;
+      if (!silent) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      setError(null);
+      try {
+        const [ticketPayload, raporPayload] = await Promise.all([
+          listDinasTickets({}, accessToken),
+          getRapor().catch(() => null),
+        ]);
+        const list = Array.isArray(ticketPayload)
+          ? ticketPayload
+          : ticketPayload?.tickets || [];
+        setRawTickets(list);
+        if (raporPayload) setRapor(mapRaporResponse(raporPayload));
+        setNowMs(Date.now());
+      } catch (err) {
+        if (!silent) setError(err);
+        showToast({ type: "error", error: err });
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [user, accessToken, showToast]
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -77,16 +116,36 @@ export function DinasDashboardPage() {
   }, [user, loadData]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadData()),
+    () => onJuryEvent("reset", () => loadData({ silent: true })),
     [loadData]
+  );
+
+  const rows = useMemo(
+    () => mapDinasTicketsToRows(rawTickets, nowMs),
+    [rawTickets, nowMs]
   );
 
   const counts = useMemo(() => computeDinasQueueCounts(rows), [rows]);
 
+  const handleFilterChange = useCallback(
+    (next: DinasQueueFilterKey) => {
+      setActiveFilter(next);
+      const params = new URLSearchParams(searchParams);
+      if (next === "ALL") params.delete("status");
+      else params.set("status", next);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
   const filteredTickets = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return rows.filter((ticket) => {
-      if (activeFilter !== "ALL" && ticket.status !== activeFilter) return false;
+      if (activeFilter === "CLOSED") {
+        if (ticket.status !== "CLOSED" && ticket.status !== "AUTO_CLOSED") return false;
+      } else if (activeFilter !== "ALL" && ticket.status !== activeFilter) {
+        return false;
+      }
       if (regionFilter !== "ALL" && ticket.region !== regionFilter) return false;
       if (!query) return true;
       return (
@@ -161,23 +220,87 @@ export function DinasDashboardPage() {
     setRegionFilter(REGION_CYCLE[(index + 1) % REGION_CYCLE.length]);
   };
 
+  const applyServerActionPatch = useCallback(
+    (
+      ticketId: string,
+      actionId: DinasActionId,
+      serverData?: Record<string, unknown> | null
+    ) => {
+      setRawTickets((prev) => {
+        if (actionId === "transfer") {
+          return prev.filter((item) => item.id !== ticketId);
+        }
+        return prev.map((item) => {
+          if (item.id !== ticketId) return item;
+          const nextStatus =
+            (serverData?.status as TicketStatusCode) || item.status;
+          return {
+            ...item,
+            status: nextStatus,
+            slaDeadline:
+              (serverData?.slaDeadline as string) || item.slaDeadline,
+            appealUsed: actionId === "counter-dispute" ? true : item.appealUsed,
+            isFastResolveAnomaly:
+              typeof serverData?.isFastResolveAnomaly === "boolean"
+                ? serverData.isFastResolveAnomaly
+                : item.isFastResolveAnomaly,
+          };
+        });
+      });
+    },
+    []
+  );
+
   const handleResetFilters = () => {
-    setActiveFilter("ALL");
+    handleFilterChange("ALL");
     setRegionFilter("ALL");
     setSearchQuery("");
+  };
+
+  const executeQuickProcess = async (ticket: DinasTicketViewRow) => {
+    const lockKey = `${ticket.id}:process`;
+    if (busyActionKey) return;
+    setBusyActionKey(lockKey);
+    try {
+      const serverData = await executeDinasAction(
+        ticket.id,
+        "process",
+        {},
+        accessToken
+      );
+      applyServerActionPatch(ticket.id, "process", serverData);
+      showToast({
+        type: "success",
+        title: "Pengerjaan dimulai",
+        message: `${ticket.displayCode} kini berstatus Sedang Ditangani dan tercatat di segel audit.`,
+      });
+      void loadData({ silent: true });
+    } catch (err) {
+      showToast({ type: "error", error: err });
+    } finally {
+      setBusyActionKey(null);
+    }
   };
 
   const handleTicketAction = (
     ticket: DinasTicketViewRow,
     action: TicketActionItem
   ) => {
-    if (action.disabled) return;
+    if (action.disabled || busyActionKey) return;
+    if (action.id === "process") {
+      void executeQuickProcess(ticket);
+      return;
+    }
     setSelectedAction({ ticket, action });
   };
 
   const openActionForTicket = (ticketId: string, actionId: DinasActionId) => {
     const ticket = rows.find((row) => row.id === ticketId);
-    const action = ticket?.actions.find((item) => item.id === actionId);
+    const action =
+      ticket?.actions.find((item) => item.id === actionId) ||
+      (ticket
+        ? buildDinasTicketActions(ticket, nowMs).find((item) => item.id === actionId)
+        : undefined);
     if (!ticket || !action) {
       showToast({
         type: "warning",
@@ -194,7 +317,7 @@ export function DinasDashboardPage() {
     ? `Admin · ${user.departmentShortName}`
     : "Admin · Dinas";
 
-  if (loading) {
+  if (loading && rawTickets.length === 0) {
     return (
       <div className="min-h-screen bg-bg text-fg flex flex-col">
         <TopNavbar profileLabel={profileLabel} />
@@ -229,7 +352,7 @@ export function DinasDashboardPage() {
             <p className="font-sans text-sm text-fg-muted">
               Periksa koneksi lalu muat ulang data. Sesi dan filter tetap aman.
             </p>
-            <Button variant="primary" size="md" onClick={loadData}>
+            <Button variant="primary" size="md" onClick={() => void loadData()}>
               Muat Ulang
             </Button>
           </div>
@@ -252,7 +375,7 @@ export function DinasDashboardPage() {
               ?.score ?? 80
           }
           activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
+          onFilterChange={handleFilterChange}
           counts={counts}
         />
 
@@ -290,6 +413,16 @@ export function DinasDashboardPage() {
                   ? "Filter Wilayah"
                   : `Wilayah: ${regionFilter}`}
               </Button>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={refreshing}
+                onClick={() => void loadData({ silent: true })}
+                leftIcon={<RefreshCw className="size-3.5" />}
+              >
+                Segarkan
+              </Button>
             </div>
           </header>
 
@@ -313,7 +446,8 @@ export function DinasDashboardPage() {
             tickets={filteredTickets}
             activeTab={activeFilter}
             counts={counts}
-            onTabChange={setActiveFilter}
+            busyActionKey={busyActionKey}
+            onTabChange={handleFilterChange}
             onAction={handleTicketAction}
             onResetFilters={handleResetFilters}
           />
@@ -328,7 +462,16 @@ export function DinasDashboardPage() {
         accessToken={accessToken}
         isJuryMode={isJuryMode}
         onClose={() => setSelectedAction(null)}
-        onSuccess={loadData}
+        onSuccess={(serverData) => {
+          if (selectedAction) {
+            applyServerActionPatch(
+              selectedAction.ticket.id,
+              selectedAction.action.id,
+              serverData
+            );
+          }
+          void loadData({ silent: true });
+        }}
       />
     </div>
   );

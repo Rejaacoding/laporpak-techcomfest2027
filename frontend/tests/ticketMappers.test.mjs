@@ -55,15 +55,16 @@ test("computeDinasQueueCounts aggregates queue filter counts", () => {
     { status: "ESCALATED" },
     { status: "PENDING_VALIDATION" },
     { status: "CLOSED" },
+    { status: "AUTO_CLOSED" },
     { status: "OPEN" },
   ]);
   assert.deepEqual(counts, {
-    ALL: 7,
+    ALL: 8,
     OVERDUE: 2,
     DISPUTED: 1,
     ESCALATED: 1,
     PENDING_VALIDATION: 1,
-    CLOSED: 1,
+    CLOSED: 2,
   });
 });
 

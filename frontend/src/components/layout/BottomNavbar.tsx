@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BarChart3, Camera, Home, Map, User } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
+import { openProfileDrawer } from "./ProfileDrawer.tsx";
 
 export type BottomNavTabKey = "beranda" | "peta" | "lapor" | "rapor" | "profil";
 
@@ -140,6 +141,8 @@ export function BottomNavbar({
               onProfileClick();
             } else if (!user) {
               navigate("/login");
+            } else {
+              openProfileDrawer();
             }
           }}
           aria-label={user ? `Profil ${user.aliasName}` : "Masuk ke profil warga"}

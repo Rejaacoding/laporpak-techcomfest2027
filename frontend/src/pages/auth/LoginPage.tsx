@@ -34,12 +34,26 @@ export default function LoginPage() {
   );
   const showExpiredBanner = sessionExpired || stateExpired;
 
+  const rawFrom = (location.state as { from?: string } | null)?.from;
+  const resolvePostLoginPath = (role: "WARGA" | "ADMIN_DINAS") => {
+    if (role === "ADMIN_DINAS") return "/dinas";
+    if (
+      typeof rawFrom === "string" &&
+      rawFrom.startsWith("/") &&
+      !rawFrom.startsWith("//") &&
+      !rawFrom.startsWith("/login") &&
+      !rawFrom.startsWith("/dinas")
+    ) {
+      return rawFrom;
+    }
+    return "/";
+  };
+
   // Redirect authenticated users according to role (US-011)
   useEffect(() => {
     if (authLoading || !user) return;
-    const target = user.role === "ADMIN_DINAS" ? "/dinas" : "/";
-    navigate(target, { replace: true });
-  }, [user, authLoading, navigate]);
+    navigate(resolvePostLoginPath(user.role), { replace: true });
+  }, [user, authLoading, navigate, rawFrom]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +75,7 @@ export default function LoginPage() {
       clearSessionExpired();
       if (mode === "login") {
         const profile = await signInWithPassword(email, password);
-        navigate(profile.role === "ADMIN_DINAS" ? "/dinas" : "/", {
+        navigate(resolvePostLoginPath(profile.role), {
           replace: true,
         });
       } else {
@@ -72,7 +86,7 @@ export default function LoginPage() {
           );
           setMode("login");
         } else if (result.profile) {
-          navigate("/", { replace: true });
+          navigate(resolvePostLoginPath(result.profile.role), { replace: true });
         }
       }
     } catch (err) {
