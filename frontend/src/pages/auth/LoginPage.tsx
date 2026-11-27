@@ -41,6 +41,7 @@ export default function LoginPage() {
       typeof rawFrom === "string" &&
       rawFrom.startsWith("/") &&
       !rawFrom.startsWith("//") &&
+      !rawFrom.includes("\\") &&
       !rawFrom.startsWith("/login") &&
       !rawFrom.startsWith("/dinas")
     ) {

@@ -9,7 +9,7 @@ import {
 import { prisma } from "../lib/prisma.js";
 import { computeAuditHash, signCaptureNonce, verifyCaptureNonce } from "../lib/crypto.js";
 import { isInsideServiceArea } from "../lib/geo.js";
-import { invalidatePublicCaches, redis } from "../lib/redis.js";
+import { getPublicCacheVersion, invalidatePublicCaches, redis } from "../lib/redis.js";
 import { AppError } from "../lib/errors.js";
 import { assertJuryDemoIsolation } from "../middlewares/guard.middleware.js";
 import {
@@ -63,6 +63,13 @@ function formatTicketPin(t) {
 }
 
 export async function checkRadiusPreCamera({ lat, lng, category, isJuryMode = false }) {
+  const ver = await getPublicCacheVersion();
+  const gridLat = roundPublicCoord(lat);
+  const gridLng = roundPublicCoord(lng);
+  const cacheKey = `cache:v${ver}:radius:${gridLat}:${gridLng}:${category || "all"}:${isJuryMode ? 1 : 0}`;
+  const cached = await redis.safeGetJson(cacheKey);
+  if (cached) return cached;
+
   const insideServiceArea = isJuryMode ? true : isInsideServiceArea(lat, lng);
   const rawNearby = await findNearbyActiveTickets50m(prisma, { lat, lng });
 
@@ -85,7 +92,7 @@ export async function checkRadiusPreCamera({ lat, lng, category, isJuryMode = fa
     guidanceText = `Ada ${rawNearby.length} laporan aktif di sekitar titik ini. Kamu bisa dukung laporan tetangga atau lanjut buat laporan baru.`;
   }
 
-  return {
+  const payload = {
     insideServiceArea,
     sameCategoryCount50m: sameCategoryRows.length,
     sameCategoryLimit: LIMITS.SAME_CATEGORY_MAX_ACTIVE,
@@ -107,6 +114,9 @@ export async function checkRadiusPreCamera({ lat, lng, category, isJuryMode = fa
       slaDeadline: r.slaDeadline,
     })),
   };
+
+  await redis.safeSetJson(cacheKey, payload, 15);
+  return payload;
 }
 
 export function issueCaptureNonce({ user, deviceFingerprint, actionType, ticketId }) {
@@ -314,8 +324,9 @@ export async function createTicket({ req, body }) {
 }
 
 export async function listPublicTickets(query) {
-  const cacheKey = `cache:tickets:${query.category || "all"}:${query.status || "all"}:${query.departmentId || "all"}`;
-  const cached = await redis.getJson(cacheKey);
+  const ver = await getPublicCacheVersion();
+  const cacheKey = `cache:v${ver}:tickets:${query.category || "all"}:${query.status || "all"}:${query.departmentId || "all"}`;
+  const cached = await redis.safeGetJson(cacheKey);
   if (cached) return cached;
 
   await evaluateActiveTicketsBatch();
@@ -339,67 +350,104 @@ export async function listPublicTickets(query) {
   });
 
   const formatted = rows.map(formatTicketPin);
-  await redis.setJson(cacheKey, formatted, LIMITS.MAP_CACHE_TTL_SECONDS);
+  await redis.safeSetJson(cacheKey, formatted, LIMITS.MAP_CACHE_TTL_SECONDS);
   return formatted;
 }
 
-export async function getTicketDetail({ ticketId, query, user }) {
-  await evaluateTicketLazy(ticketId);
+function isTicketCacheableSnapshot(ticket) {
+  if (!ticket) return false;
+  const nowMs = Date.now();
+  const bufferMs = 60_000;
+  if (["CLOSED", "AUTO_CLOSED", "OUT_OF_SCOPE", "REJECTED_SPAM", "ESCALATED"].includes(ticket.status)) {
+    return true;
+  }
+  if (ticket.status === "OPEN" || ticket.status === "IN_PROGRESS") {
+    return new Date(ticket.slaDeadline).getTime() > nowMs + bufferMs;
+  }
+  if (ticket.status === "DISPUTED" && ticket.disputedAt) {
+    const reworkAt = new Date(ticket.disputedAt).getTime() + LIMITS.DISPUTE_RESPONSE_HOURS * 3600 * 1000;
+    return reworkAt > nowMs + bufferMs;
+  }
+  if (ticket.status === "PENDING_VALIDATION" && ticket.validationStartedAt) {
+    const startMs = new Date(ticket.validationStartedAt).getTime();
+    const coolingAt = startMs + LIMITS.PUBLIC_COOLING_WINDOW_HOURS * 3600 * 1000;
+    const autoCloseAt = startMs + LIMITS.PUBLIC_VALIDATION_AUTO_CLOSE_HOURS * 3600 * 1000;
+    return Math.abs(nowMs - coolingAt) > bufferMs && autoCloseAt > nowMs + bufferMs;
+  }
+  return false;
+}
 
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: ticketId },
-    include: {
-      department: { select: { id: true, code: true, name: true, shortName: true, integrityScore: true } },
-      reporter: { select: { aliasName: true } },
-      validations: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          validationRound: true,
-          type: true,
-          weightAtVote: true,
-          effectiveWeight: true,
-          isCollusionSuspect: true,
-          distanceMeters: true,
-          createdAt: true,
-          validatorId: true,
-          validator: { select: { aliasName: true } },
-        },
-      },
-      supports: {
-        select: { userId: true, createdAt: true },
-      },
-      ratings: {
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          userId: true,
-          stars: true,
-          comment: true,
-          createdAt: true,
-          user: { select: { aliasName: true } },
-        },
-      },
-      auditLogs: {
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: {
-          id: true,
-          actorRole: true,
-          actorDisplayLabel: true,
-          action: true,
-          fromStatus: true,
-          toStatus: true,
-          note: true,
-          timestampMs: true,
-          currentHash: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
+export async function getTicketDetail({ ticketId, query, user }) {
+  const ver = await getPublicCacheVersion();
+  const detailCacheKey = `cache:v${ver}:detail:${ticketId}`;
+  let ticket = await redis.safeGetJson(detailCacheKey);
 
   if (!ticket) {
-    throw new AppError(404, "NOT_FOUND");
+    await evaluateTicketLazy(ticketId);
+
+    ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        department: { select: { id: true, code: true, name: true, shortName: true, integrityScore: true } },
+        reporter: { select: { aliasName: true } },
+        validations: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            validationRound: true,
+            type: true,
+            weightAtVote: true,
+            effectiveWeight: true,
+            isCollusionSuspect: true,
+            distanceMeters: true,
+            createdAt: true,
+            validatorId: true,
+            validator: { select: { aliasName: true } },
+          },
+        },
+        supports: {
+          select: { userId: true, createdAt: true },
+        },
+        ratings: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            userId: true,
+            stars: true,
+            comment: true,
+            createdAt: true,
+            user: { select: { aliasName: true } },
+          },
+        },
+        auditLogs: {
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            actorRole: true,
+            actorDisplayLabel: true,
+            action: true,
+            fromStatus: true,
+            toStatus: true,
+            note: true,
+            timestampMs: true,
+            currentHash: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!ticket) {
+      throw new AppError(404, "NOT_FOUND");
+    }
+
+    if (isTicketCacheableSnapshot(ticket)) {
+      const serializable = {
+        ...ticket,
+        auditLogs: ticket.auditLogs.map((l) => ({ ...l, timestampMs: Number(l.timestampMs) })),
+      };
+      await redis.safeSetJson(detailCacheKey, serializable, 30);
+    }
   }
 
   let userDistanceMeters = null;
@@ -562,9 +610,7 @@ async function buildUiFlags({ ticket, user, userDistanceMeters, queryAccuracy, v
 
   if (user.role === "WARGA") {
     const isReporter = user.id === ticket.reporterId;
-    const alreadySupported = await prisma.ticketSupport.findUnique({
-      where: { ticketId_userId: { ticketId: ticket.id, userId: user.id } },
-    });
+    const alreadySupported = (ticket.supports || []).some((s) => s.userId === user.id);
 
     if (ticket.status !== "OPEN" && ticket.status !== "IN_PROGRESS") {
       disabledReasons.support = "Dukungan prioritas hanya aktif saat laporan masuk atau sedang ditangani.";
@@ -750,6 +796,7 @@ export async function supportTicket({ req, ticketId }) {
 }
 
 export async function verifyTicketAuditChain(ticketId) {
+  // Intentionally uncached: must verify live HMAC chain against PostgreSQL so out-of-band DB tampering is caught immediately.
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true, code: true } });
   if (!ticket) throw new AppError(404, "NOT_FOUND");
 

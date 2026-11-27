@@ -1,14 +1,15 @@
 import { LIMITS } from "../shared/constants.js";
 import { prisma } from "../lib/prisma.js";
-import { invalidatePublicCaches, redis } from "../lib/redis.js";
+import { getPublicCacheVersion, invalidatePublicCaches, redis } from "../lib/redis.js";
 import { AppError } from "../lib/errors.js";
 import { assertJuryDemoIsolation } from "../middlewares/guard.middleware.js";
 import { assertCitizenStanding } from "../middlewares/security.middleware.js";
 import { evaluateActiveTicketsBatch } from "./lazy-eval.service.js";
 
 export async function getRaporData({ category } = {}) {
-  const cacheKey = `cache:rapor:${category || "all"}`;
-  const cached = await redis.getJson(cacheKey);
+  const ver = await getPublicCacheVersion();
+  const cacheKey = `cache:v${ver}:rapor:${category || "all"}`;
+  const cached = await redis.safeGetJson(cacheKey);
   if (cached) return cached;
 
   await evaluateActiveTicketsBatch();
@@ -124,7 +125,7 @@ export async function getRaporData({ category } = {}) {
     clusterPoints,
   };
 
-  await redis.setJson(cacheKey, payload, LIMITS.RAPOR_CACHE_TTL_SECONDS);
+  await redis.safeSetJson(cacheKey, payload, LIMITS.RAPOR_CACHE_TTL_SECONDS);
   return payload;
 }
 

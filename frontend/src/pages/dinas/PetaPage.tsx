@@ -192,20 +192,19 @@ export function DinasPetaPage() {
       ? null
       : visiblePins.find((pin) => pin.id === selectedPinId) || visiblePins[0] || null;
 
-  const clusters = useMemo(() => {
-    if (visiblePins.length === 0) return [];
-    const mapped = mapRaporResponse({
-      departments: [],
-      clusterPoints: visiblePins.map((pin) => ({
+  const mapPins = useMemo(
+    () =>
+      visiblePins.map((pin) => ({
         id: pin.id,
-        category: pin.category,
+        title: pin.categoryTitle,
+        code: pin.code,
+        displayCode: pin.displayCode,
         status: pin.status,
-        lat: pin.publicLat ?? Number.NaN,
-        lng: pin.publicLng ?? Number.NaN,
+        lat: pin.publicLat,
+        lng: pin.publicLng,
       })),
-    });
-    return mapped.clusters.filter((cluster) => cluster.count >= 2).slice(0, 3);
-  }, [visiblePins]);
+    [visiblePins]
+  );
 
   useEffect(() => {
     setRevealedPhotoUrl(null);
@@ -367,15 +366,7 @@ export function DinasPetaPage() {
               ) : (
                 <>
                   <CivicLeafletMap
-                    pins={visiblePins.map((pin) => ({
-                      id: pin.id,
-                      title: pin.categoryTitle,
-                      code: pin.code,
-                      displayCode: pin.displayCode,
-                      status: pin.status,
-                      lat: pin.publicLat,
-                      lng: pin.publicLng,
-                    }))}
+                    pins={mapPins}
                     selectedPinId={selectedPin?.id ?? null}
                     onSelectPin={setSelectedPinId}
                     focusTarget={focusTarget}

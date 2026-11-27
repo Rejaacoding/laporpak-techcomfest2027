@@ -1,9 +1,13 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { redis } from "./redis.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const localMediaDir = path.resolve(__dirname, "..", "..", "..", ".local-media");
+const JWT_CACHE_MAX_TTL_SECONDS = 60;
+const jwtL1Cache = new Map();
 
 // shortcut: jika SUPABASE_URL belum diisi di dev lokal, media disimpan di .local-media/ (gitignored); otomatis pakai Supabase Storage saat env aktif.
 
@@ -38,8 +42,41 @@ function resolveBucket(objectKey, isPrivate = false) {
   return getPublicBucket();
 }
 
+function getJwtRemainingSeconds(accessToken) {
+  try {
+    const parts = String(accessToken || "").split(".");
+    if (parts.length !== 3) return JWT_CACHE_MAX_TTL_SECONDS;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (typeof payload?.exp === "number") {
+      return Math.floor(payload.exp - Date.now() / 1000) - 5;
+    }
+  } catch {
+    // Ignore malformed payload; Supabase /auth/v1/user remains source of truth.
+  }
+  return JWT_CACHE_MAX_TTL_SECONDS;
+}
+
 export async function verifySupabaseJwt(accessToken) {
-  if (!hasSupabaseConfig()) return null;
+  if (!hasSupabaseConfig() || !accessToken) return null;
+
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(String(accessToken))
+    .digest("hex")
+    .slice(0, 32);
+  const redisKey = `auth:jwt:${tokenHash}`;
+
+  const l1 = jwtL1Cache.get(tokenHash);
+  if (l1 && Date.now() < l1.exp) {
+    return l1.user;
+  }
+
+  const cached = await redis.safeGetJson(redisKey);
+  if (cached?.id) {
+    jwtL1Cache.set(tokenHash, { user: cached, exp: Date.now() + 30_000 });
+    return cached;
+  }
+
   const res = await fetch(`${getSupabaseUrl()}/auth/v1/user`, {
     headers: {
       apikey: getAnonKey() || getServiceKey(),
@@ -48,7 +85,24 @@ export async function verifySupabaseJwt(accessToken) {
     signal: AbortSignal.timeout(4000),
   });
   if (!res.ok) return null;
-  return res.json();
+  const fullUser = await res.json();
+  if (!fullUser?.id) return null;
+
+  const compactUser = {
+    id: fullUser.id,
+    email: fullUser.email || "",
+    email_confirmed_at: fullUser.email_confirmed_at || null,
+    confirmed_at: fullUser.confirmed_at || null,
+    app_metadata: { provider: fullUser.app_metadata?.provider || null },
+  };
+
+  const ttl = Math.min(JWT_CACHE_MAX_TTL_SECONDS, getJwtRemainingSeconds(accessToken));
+  if (ttl >= 5) {
+    if (jwtL1Cache.size > 500) jwtL1Cache.clear();
+    jwtL1Cache.set(tokenHash, { user: compactUser, exp: Date.now() + ttl * 1000 });
+    await redis.safeSetJson(redisKey, compactUser, ttl);
+  }
+  return compactUser;
 }
 
 export async function uploadStorageObject(objectKey, buffer, contentType, { isPrivate = false } = {}) {

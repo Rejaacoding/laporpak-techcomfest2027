@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -150,6 +150,17 @@ export function WargaCatatanPage() {
   const stats = data?.wargaKpiStats ?? [];
   const departments = data?.departments ?? [];
   const clusters = data?.clusters ?? [];
+  const mapClusters = useMemo(
+    () =>
+      clusters.map((c) => ({
+        id: c.id,
+        label: c.label,
+        count: c.count,
+        lat: c.lat,
+        lng: c.lng,
+      })),
+    [clusters]
+  );
   const pendingValidationCount = data?.pendingValidationCount ?? 0;
   const activeCluster =
     clusters.find((cluster) => cluster.id === activeClusterId) || clusters[0] || null;
@@ -394,13 +405,7 @@ export function WargaCatatanPage() {
 
                 <div className="relative h-[250px] md:h-[300px] rounded-2xl border border-line overflow-hidden shadow-card">
                   <CivicLeafletMap
-                    clusters={clusters.map((c) => ({
-                      id: c.id,
-                      label: c.label,
-                      count: c.count,
-                      lat: c.lat,
-                      lng: c.lng,
-                    }))}
+                    clusters={mapClusters}
                     selectedClusterId={activeCluster?.id ?? null}
                     onSelectCluster={setActiveClusterId}
                     ariaLabel="Peta klaster titik rawan Surabaya dan Sidoarjo"

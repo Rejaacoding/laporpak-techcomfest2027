@@ -19,6 +19,7 @@ import {
 } from "../shared/schemas.js";
 import crypto from "node:crypto";
 import { DEPARTMENTS } from "../shared/constants.js";
+import { isHostedProduction, safeEqual } from "../lib/crypto.js";
 import { prisma } from "../lib/prisma.js";
 import { redis } from "../lib/redis.js";
 import { AppError, okResponse } from "../lib/errors.js";
@@ -169,9 +170,22 @@ export async function getMediaSignedUrlController(req, res, next) {
     const { type } = mediaSignedUrlQuerySchema.parse(req.query || {});
     const ticket = await prisma.ticket.findUnique({
       where: { id: req.params.id },
-      select: { id: true, beforePhotoKey: true, afterPhotoKey: true, isNsfwPendingReview: true },
+      select: {
+        id: true,
+        status: true,
+        departmentId: true,
+        beforePhotoKey: true,
+        afterPhotoKey: true,
+        isNsfwPendingReview: true,
+      },
     });
     if (!ticket) throw new AppError(404, "NOT_FOUND");
+    const targetKey = type === "after" ? ticket.afterPhotoKey : ticket.beforePhotoKey;
+    const isQuarantined =
+      ticket.status === "REJECTED_SPAM" || String(targetKey || "").startsWith("private/quarantine/");
+    if (isQuarantined && req.user?.role !== "ADMIN_DINAS") {
+      throw new AppError(403, "FORBIDDEN", "Berkas karantina spam hanya dapat diakses oleh petugas dinas.");
+    }
     const data = await getSignedNsfwMediaUrl(ticket, type);
     return okResponse(res, data, "Tautan gambar sementara berlaku 60 detik.");
   } catch (err) {
@@ -299,7 +313,7 @@ export function makeDinasActionController(action) {
   };
 }
 
-const PARTNER_INVITE_CODES = {
+const DEV_PARTNER_INVITE_CODES = {
   "MITRA-DISHUB-2027": "DISHUB",
   "MITRA-PU-2027": "DPU",
   "MITRA-DPU-2027": "DPU",
@@ -307,27 +321,75 @@ const PARTNER_INVITE_CODES = {
   "MITRA-SATPOLPP-2027": "SATPOLPP",
 };
 
+function loadPartnerInviteCodes() {
+  const rawJson = process.env.PARTNER_INVITE_CODES_JSON?.trim();
+  if (rawJson) {
+    try {
+      const parsed = JSON.parse(rawJson);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      return {};
+    }
+  }
+  return isHostedProduction() ? {} : DEV_PARTNER_INVITE_CODES;
+}
+
 export async function aktivasiMitraController(req, res, next) {
   try {
     const body = aktivasiMitraBodySchema.parse(req.body || {});
+    const inviteCodes = loadPartnerInviteCodes();
+    if (isHostedProduction() && Object.keys(inviteCodes).length === 0) {
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "Aktivasi mitra mandiri nonaktif di produksi sampai kode resmi server dikonfigurasi."
+      );
+    }
+
+    const normalizedEmail = body.email.toLowerCase();
+    if (isHostedProduction()) {
+      if (!req.user) {
+        throw new AppError(401, "UNAUTHORIZED", "Masuk terlebih dahulu sebelum mengaktifkan akun mitra.");
+      }
+      const callerEmail = String(req.user.email || "").toLowerCase();
+      if (req.user.role !== "ADMIN_DINAS" && callerEmail !== normalizedEmail) {
+        throw new AppError(403, "FORBIDDEN", "Email aktivasi harus sama dengan akun yang sedang masuk.");
+      }
+    }
+
     const code = body.activationCode.toUpperCase();
-    const departmentId = PARTNER_INVITE_CODES[code];
-    if (!departmentId) {
+    const departmentId = Object.prototype.hasOwnProperty.call(inviteCodes, code)
+      ? inviteCodes[code]
+      : null;
+    if (!departmentId || !DEPARTMENTS[departmentId]) {
       throw new AppError(401, "UNAUTHORIZED", "Kode aktivasi mitra tidak sah atau tidak dikenali.");
     }
 
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true, role: true, departmentId: true, isVerifiedPartner: true },
+    });
+    if (
+      existingUser &&
+      existingUser.role === "ADMIN_DINAS" &&
+      existingUser.departmentId &&
+      existingUser.departmentId !== departmentId
+    ) {
+      throw new AppError(409, "VERSION_CONFLICT", "Email ini sudah terdaftar sebagai petugas instansi lain.");
+    }
+
     const codeKey = `mitra:used:${code}`;
-    const firstUse = await redis.setNx(codeKey, body.email, 365 * 24 * 3600);
+    const firstUse = await redis.setNx(codeKey, normalizedEmail, 365 * 24 * 3600);
     if (!firstUse) {
       throw new AppError(409, "VERSION_CONFLICT", "Kode aktivasi mitra sekali pakai ini sudah pernah digunakan.");
     }
 
     const aliasName = body.aliasName || `Mitra-${departmentId}-${crypto.randomInt(100, 999)}`;
     const user = await prisma.user.upsert({
-      where: { email: body.email.toLowerCase() },
+      where: { email: normalizedEmail },
       create: {
         id: req.user?.id || `mitra_${crypto.randomBytes(8).toString("hex")}`,
-        email: body.email.toLowerCase(),
+        email: normalizedEmail,
         aliasName,
         role: "ADMIN_DINAS",
         departmentId,
@@ -358,8 +420,35 @@ export async function aktivasiMitraController(req, res, next) {
   }
 }
 
-export async function cronSlaController(_req, res, next) {
+export async function cronSlaController(req, res, next) {
   try {
+    const authHeader = req.header("authorization") || "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const cronSecret = process.env.CRON_SECRET?.trim();
+
+    if (cronSecret) {
+      if (!bearer || !safeEqual(bearer, cronSecret)) {
+        throw new AppError(401, "UNAUTHORIZED", "Token autentikasi cron tidak valid.");
+      }
+    } else if (isHostedProduction()) {
+      const serverSecret = process.env.SERVER_SECRET?.trim();
+      const hasValidServerBearer = Boolean(serverSecret && bearer && safeEqual(bearer, serverSecret));
+      const isVercelCronUa = req.header("user-agent") === "vercel-cron/1.0";
+      if (!hasValidServerBearer && !req.isJuryMode && !isVercelCronUa) {
+        throw new AppError(401, "UNAUTHORIZED", "Endpoint cron hanya dapat dipicu oleh scheduler resmi.");
+      }
+      if (isVercelCronUa && !hasValidServerBearer) {
+        const acquired = await redis.setNx("cron:sla:prod:lock", "1", 600);
+        if (!acquired) {
+          return okResponse(
+            res,
+            { evaluatedAt: new Date().toISOString(), skippedByThrottle: true },
+            "Evaluasi SLA baru saja dijalankan."
+          );
+        }
+      }
+    }
+
     await evaluateActiveTicketsBatch({ force: true });
 
     const expiredQuarantine = await prisma.ticket.findMany({

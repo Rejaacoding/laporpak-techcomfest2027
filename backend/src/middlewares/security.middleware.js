@@ -3,6 +3,7 @@ import { haversineMeters } from "../lib/geo.js";
 import { redis } from "../lib/redis.js";
 import { AppError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
+import { getTrustedClientIp } from "./auth.middleware.js";
 
 export function assertCitizenStanding(user, { allowZeroScoreForReport = false } = {}) {
   const now = new Date();
@@ -86,7 +87,8 @@ export function assertNoImpossibleTravel(user, lat, lng, gpsAccuracyMeters, isJu
 export function makeIpRateLimiter({ prefix, maxRequests, windowSeconds, errorMessage }) {
   return async (req, _res, next) => {
     try {
-      const ip = String(req.ip || req.socket?.remoteAddress || "unknown").replace(/[^a-zA-Z0-9.:_-]/g, "_");
+      const rawIp = req.clientIp || getTrustedClientIp(req) || "unknown";
+      const ip = String(rawIp).replace(/[^a-zA-Z0-9.:_-]/g, "_");
       const key = `rl:ip:${prefix}:${ip}`;
       const count = await redis.incrWithTtl(key, windowSeconds);
       if (count > maxRequests) {
@@ -111,4 +113,25 @@ export const enforceSignedMediaRateLimit = makeIpRateLimiter({
   maxRequests: 60,
   windowSeconds: 60,
   errorMessage: "Terlalu banyak permintaan membuka gambar. Tunggu sebentar lalu muat ulang.",
+});
+
+export const enforceRadiusCheckRateLimit = makeIpRateLimiter({
+  prefix: "check_radius",
+  maxRequests: 60,
+  windowSeconds: 60,
+  errorMessage: "Terlalu banyak pengecekan lokasi. Tunggu beberapa detik lalu coba lagi.",
+});
+
+export const enforceCaptureNonceRateLimit = makeIpRateLimiter({
+  prefix: "capture_nonce",
+  maxRequests: 30,
+  windowSeconds: 60,
+  errorMessage: "Terlalu banyak permintaan kupon kamera. Tunggu sebentar lalu coba lagi.",
+});
+
+export const enforceCronRateLimit = makeIpRateLimiter({
+  prefix: "cron_sla",
+  maxRequests: 5,
+  windowSeconds: 300,
+  errorMessage: "Terlalu banyak permintaan evaluasi SLA terjadwal.",
 });

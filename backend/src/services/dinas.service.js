@@ -1,6 +1,6 @@
 import { CATEGORIES, DEPARTMENTS, LIMITS, TICKET_STATUSES } from "../shared/constants.js";
 import { prisma } from "../lib/prisma.js";
-import { invalidatePublicCaches, redis } from "../lib/redis.js";
+import { getPublicCacheVersion, invalidatePublicCaches, redis } from "../lib/redis.js";
 import { AppError } from "../lib/errors.js";
 import { assertJuryDemoIsolation } from "../middlewares/guard.middleware.js";
 import { assertGpsAccuracy } from "../middlewares/security.middleware.js";
@@ -39,8 +39,9 @@ function assertInitialWindowOpen(ticket, actionLabel) {
 }
 
 export async function listDinasTickets({ departmentId, query }) {
-  const cacheKey = `cache:dinas:${departmentId}:${query.status || "all"}:${query.category || "all"}`;
-  const cached = await redis.getJson(cacheKey);
+  const ver = await getPublicCacheVersion();
+  const cacheKey = `cache:v${ver}:dinas:${departmentId}:${query.status || "all"}:${query.category || "all"}`;
+  const cached = await redis.safeGetJson(cacheKey);
   if (cached) return cached;
 
   await evaluateActiveTicketsBatch();
@@ -106,7 +107,7 @@ export async function listDinasTickets({ departmentId, query }) {
     isDemoData: t.isDemoData,
   }));
 
-  await redis.setJson(cacheKey, payload, 60);
+  await redis.safeSetJson(cacheKey, payload, 60);
   return payload;
 }
 

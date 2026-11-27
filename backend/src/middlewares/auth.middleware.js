@@ -1,7 +1,28 @@
 import { prisma } from "../lib/prisma.js";
-import { computeIpSubnetHash, generateAliasName, verifyJurySession } from "../lib/crypto.js";
+import {
+  computeIpSubnetHash,
+  generateAliasName,
+  isHostedProduction,
+  verifyJurySession,
+} from "../lib/crypto.js";
+import { redis } from "../lib/redis.js";
 import { hasSupabaseConfig, verifySupabaseJwt } from "../lib/supabase.js";
 import { AppError } from "../lib/errors.js";
+
+export function getTrustedClientIp(req) {
+  if (isHostedProduction()) {
+    const platformIp =
+      req.header("x-vercel-forwarded-for") ||
+      req.header("x-real-ip") ||
+      req.ip ||
+      req.socket?.remoteAddress ||
+      "";
+    return String(platformIp).split(",")[0].trim();
+  }
+  const devIp =
+    req.header("x-forwarded-for") || req.ip || req.socket?.remoteAddress || "";
+  return String(devIp).split(",")[0].trim();
+}
 
 export const JURY_ROLE_USER_MAP = {
   WARGA_PELAPOR: "demo-warga-pelapor",
@@ -15,20 +36,49 @@ export const JURY_ROLE_USER_MAP = {
   ADMIN_SATPOL_PP: "demo-admin-satpolpp",
 };
 
-const ADMIN_USER_CACHE_TTL_MS = 30_000;
+const ADMIN_USER_CACHE_TTL_MS = 60_000;
+const ADMIN_USER_REDIS_TTL_SECONDS = 60;
 const adminUserCache = new Map();
 
+function setAdminL1(user) {
+  const exp = Date.now() + ADMIN_USER_CACHE_TTL_MS;
+  adminUserCache.set(`id:${user.id}`, { user, exp });
+  if (user.email) adminUserCache.set(`email:${user.email.toLowerCase()}`, { user, exp });
+}
+
+async function cacheAdminUser(user) {
+  setAdminL1(user);
+  const writes = [redis.safeSetJson(`cache:admin:id:${user.id}`, user, ADMIN_USER_REDIS_TTL_SECONDS)];
+  if (user.email) {
+    writes.push(
+      redis.safeSetJson(
+        `cache:admin:email:${user.email.toLowerCase()}`,
+        user,
+        ADMIN_USER_REDIS_TTL_SECONDS
+      )
+    );
+  }
+  await Promise.all(writes);
+}
+
 async function getUserCachedIfAdmin(where) {
-  const cacheKey = where.id ? `id:${where.id}` : where.email ? `email:${where.email}` : null;
+  const cacheKey = where.id
+    ? `id:${where.id}`
+    : where.email
+      ? `email:${String(where.email).toLowerCase()}`
+      : null;
   if (cacheKey) {
     const hit = adminUserCache.get(cacheKey);
     if (hit && Date.now() < hit.exp) return hit.user;
+    const redisHit = await redis.safeGetJson(`cache:admin:${cacheKey}`);
+    if (redisHit?.role === "ADMIN_DINAS") {
+      setAdminL1(redisHit);
+      return redisHit;
+    }
   }
   const user = await prisma.user.findUnique({ where });
   if (user && user.role === "ADMIN_DINAS") {
-    const exp = Date.now() + ADMIN_USER_CACHE_TTL_MS;
-    adminUserCache.set(`id:${user.id}`, { user, exp });
-    if (user.email) adminUserCache.set(`email:${user.email}`, { user, exp });
+    await cacheAdminUser(user);
   }
   return user;
 }
@@ -46,6 +96,11 @@ async function findOrProvisionSupabaseUser(sbUser) {
     if (emailVerified) {
       const hit = adminUserCache.get(emailCacheKey);
       if (hit && Date.now() < hit.exp) return hit.user;
+      const redisHit = await redis.safeGetJson(`cache:admin:${emailCacheKey}`);
+      if (redisHit?.role === "ADMIN_DINAS") {
+        setAdminL1(redisHit);
+        return redisHit;
+      }
     }
 
     const byEmail = await prisma.user.findFirst({
@@ -53,9 +108,7 @@ async function findOrProvisionSupabaseUser(sbUser) {
     });
     if (byEmail) {
       if (emailVerified && byEmail.role === "ADMIN_DINAS") {
-        const exp = Date.now() + ADMIN_USER_CACHE_TTL_MS;
-        adminUserCache.set(`id:${byEmail.id}`, { user: byEmail, exp });
-        adminUserCache.set(emailCacheKey, { user: byEmail, exp });
+        await cacheAdminUser(byEmail);
         return byEmail;
       }
       throw new AppError(
@@ -89,8 +142,9 @@ async function findOrProvisionSupabaseUser(sbUser) {
 export async function attachAuth(req, _res, next) {
   try {
     req.deviceFingerprint = String(req.header("x-device-fingerprint") || "fp-anonymous").slice(0, 128);
-    const forwardedIp = req.header("x-forwarded-for") || req.socket?.remoteAddress || req.ip || "";
-    req.ipSubnetHash = computeIpSubnetHash(forwardedIp);
+    const clientIp = getTrustedClientIp(req);
+    req.clientIp = clientIp;
+    req.ipSubnetHash = computeIpSubnetHash(clientIp);
     req.isJuryMode = false;
     req.jurySession = null;
     req.user = null;

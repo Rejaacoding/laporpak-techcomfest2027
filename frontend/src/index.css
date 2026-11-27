@@ -306,3 +306,8 @@
   color: #57534E !important;
   padding: 1px 6px !important;
 }
+
+.lapor-cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}

@@ -1,21 +1,28 @@
-// Upstash Redis REST client ringan tanpa SDK ekstra.
+// Upstash Redis REST client ringan tanpa SDK ekstra (mendukung atomic /pipeline & O(1) cache versioning).
 // shortcut: in-memory Map fallback saat UPSTASH_REDIS_REST_URL kosong di dev lokal; aktif otomatis ke Upstash begitu env diisi.
 
 const memStore = new Map();
+const VERSION_KEY = "cv:public";
+const VERSION_L1_TTL_MS = 2_000;
+let versionL1 = { value: null, exp: 0 };
 
 function hasUpstash() {
   return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
 }
 
+function getUpstashBaseUrl() {
+  return String(process.env.UPSTASH_REDIS_REST_URL || "").trim().replace(/\/+$/, "");
+}
+
 async function upstashCommand(args) {
-  const res = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
+  const res = await fetch(getUpstashBaseUrl(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(args),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) {
     throw new Error(`Upstash HTTP ${res.status}`);
@@ -25,6 +32,29 @@ async function upstashCommand(args) {
   return body.result;
 }
 
+async function upstashPipeline(commands) {
+  const res = await fetch(`${getUpstashBaseUrl()}/pipeline`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(commands),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    throw new Error(`Upstash Pipeline HTTP ${res.status}`);
+  }
+  const results = await res.json();
+  if (!Array.isArray(results)) {
+    throw new Error("Upstash Pipeline returned unexpected shape");
+  }
+  for (const item of results) {
+    if (item?.error) throw new Error(item.error);
+  }
+  return results.map((item) => item.result);
+}
+
 function purgeExpired(key) {
   const entry = memStore.get(key);
   if (entry && entry.exp && Date.now() > entry.exp) {
@@ -32,6 +62,39 @@ function purgeExpired(key) {
     return null;
   }
   return entry || null;
+}
+
+export async function getPublicCacheVersion() {
+  if (versionL1.value && Date.now() < versionL1.exp) {
+    return versionL1.value;
+  }
+  try {
+    let raw;
+    if (hasUpstash()) {
+      raw = await upstashCommand(["GET", VERSION_KEY]);
+    } else {
+      raw = purgeExpired(VERSION_KEY)?.val ?? null;
+    }
+    const ver = raw ? String(raw) : "1";
+    versionL1 = { value: ver, exp: Date.now() + VERSION_L1_TTL_MS };
+    return ver;
+  } catch {
+    return versionL1.value || "1";
+  }
+}
+
+export async function bumpPublicCacheVersion() {
+  versionL1 = { value: null, exp: 0 };
+  if (hasUpstash()) {
+    const next = await upstashCommand(["INCR", VERSION_KEY]);
+    versionL1 = { value: String(next), exp: Date.now() + VERSION_L1_TTL_MS };
+    return String(next);
+  }
+  const current = Number(purgeExpired(VERSION_KEY)?.val || "1");
+  const next = String(current + 1);
+  memStore.set(VERSION_KEY, { val: next, exp: 0 });
+  versionL1 = { value: next, exp: Date.now() + VERSION_L1_TTL_MS };
+  return next;
 }
 
 export const redis = {
@@ -52,6 +115,14 @@ export const redis = {
     return entry ? JSON.parse(entry.val) : null;
   },
 
+  async safeGetJson(key) {
+    try {
+      return await this.getJson(key);
+    } catch {
+      return null;
+    }
+  },
+
   async setJson(key, value, ttlSeconds) {
     const serialized = JSON.stringify(value);
     if (hasUpstash()) {
@@ -59,6 +130,14 @@ export const redis = {
       return;
     }
     memStore.set(key, { val: serialized, exp: Date.now() + ttlSeconds * 1000 });
+  },
+
+  async safeSetJson(key, value, ttlSeconds) {
+    try {
+      await this.setJson(key, value, ttlSeconds);
+    } catch {
+      // Fail-open: cache write failure must not break a valid API response.
+    }
   },
 
   async exists(key) {
@@ -91,9 +170,12 @@ export const redis = {
 
   async incrWithTtl(key, ttlSeconds) {
     if (hasUpstash()) {
-      const count = Number(await upstashCommand(["INCR", key]));
-      if (count === 1) await upstashCommand(["EXPIRE", key, String(ttlSeconds)]);
-      return count;
+      // 1-RTT atomic pipeline: EXPIRE ... NX guarantees every counter always has a TTL.
+      const [countRaw] = await upstashPipeline([
+        ["INCR", key],
+        ["EXPIRE", key, String(ttlSeconds), "NX"],
+      ]);
+      return Number(countRaw);
     }
     const entry = purgeExpired(key);
     if (!entry) {
@@ -106,6 +188,9 @@ export const redis = {
   },
 
   async deleteByPrefix(prefix) {
+    if (prefix.startsWith("cache:")) {
+      await bumpPublicCacheVersion().catch(() => {});
+    }
     if (hasUpstash()) {
       let cursor = "0";
       do {
@@ -124,11 +209,7 @@ export const redis = {
 };
 
 export async function invalidatePublicCaches() {
-  // Cache invalidation runs after DB commits; a Redis outage must not turn a
-  // successful write into a 500 for the user. TTL will self-heal stale keys.
-  await Promise.allSettled([
-    redis.deleteByPrefix("cache:tickets:"),
-    redis.deleteByPrefix("cache:rapor:"),
-    redis.deleteByPrefix("cache:dinas:"),
-  ]);
+  // O(1) version bump: 1 single Upstash INCR invalidates all versioned public/dinas/rapor/detail caches immediately.
+  // Fails open so a Redis hiccup never turns a committed DB write into a 500.
+  await bumpPublicCacheVersion().catch(() => {});
 }

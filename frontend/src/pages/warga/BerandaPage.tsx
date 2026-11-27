@@ -403,7 +403,7 @@ export function WargaBerandaPage() {
                     density="none"
                     interactive
                     onClick={() => navigate(`/tiket/${ticket.id}`)}
-                    className="group p-4 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/40"
+                    className="lapor-cv-auto group p-4 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/40"
                   >
                     <div
                       className={[
@@ -435,6 +435,7 @@ export function WargaBerandaPage() {
                             alt={`Foto laporan ${ticket.title}`}
                             className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                             loading="lazy"
+                            decoding="async"
                           />
                           <div className="absolute top-2.5 left-2.5">
                             <Badge status={ticket.status} size="sm" />

@@ -4,6 +4,7 @@ export const JURY_TOKEN_KEY = "laporpak_jury_token";
 export const JURY_ROLE_KEY = "laporpak_jury_role";
 const INSTALL_ID_KEY = "laporpak_install_id_v1";
 const fpCache = new Map();
+const inFlightGets = new Map();
 
 function getClientInstallId() {
   if (typeof window === "undefined") return "ssr";
@@ -125,42 +126,64 @@ export async function apiRequest(
   path,
   { method = "GET", token, body, idempotencyKey, headers = {}, juryOverride } = {}
 ) {
-  const deviceFp = await getDeviceFingerprint(juryOverride);
-  const finalHeaders = {
-    "X-Device-Fingerprint": deviceFp,
-    ...getJuryHeaders(juryOverride),
-    ...headers,
-  };
-  if (token) {
-    finalHeaders.Authorization = `Bearer ${token}`;
-  }
-  if (idempotencyKey) {
-    finalHeaders["Idempotency-Key"] = idempotencyKey;
-  }
-  if (body !== undefined && !finalHeaders["Content-Type"]) {
-    finalHeaders["Content-Type"] = "application/json";
+  const upperMethod = String(method || "GET").toUpperCase();
+  const juryHeaders = getJuryHeaders(juryOverride);
+  const canDedup = upperMethod === "GET" && body === undefined;
+  const dedupKey = canDedup
+    ? `${path}|${token ? token.slice(-12) : "anon"}|${juryHeaders["X-Jury-Role"] || ""}`
+    : "";
+
+  if (canDedup && inFlightGets.has(dedupKey)) {
+    return inFlightGets.get(dedupKey);
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: finalHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const run = (async () => {
+    const deviceFp = await getDeviceFingerprint(juryOverride);
+    const finalHeaders = {
+      "X-Device-Fingerprint": deviceFp,
+      ...juryHeaders,
+      ...headers,
+    };
+    if (token) {
+      finalHeaders.Authorization = `Bearer ${token}`;
+    }
+    if (idempotencyKey) {
+      finalHeaders["Idempotency-Key"] = idempotencyKey;
+    }
+    if (body !== undefined && !finalHeaders["Content-Type"]) {
+      finalHeaders["Content-Type"] = "application/json";
+    }
 
-  const payload = await res.json().catch(() => null);
-  if (!res.ok) {
-    const err = new Error(
-      payload?.error?.message || payload?.message || "Terjadi kendala saat menghubungi server."
-    );
-    err.status = res.status;
-    err.code = payload?.error?.code || payload?.code;
-    err.retryable = Boolean(payload?.error?.retryable);
-    err.details = payload?.error?.details;
-    err.data = payload;
-    throw err;
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: upperMethod,
+      headers: finalHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+    const payload = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = new Error(
+        payload?.error?.message || payload?.message || "Terjadi kendala saat menghubungi server."
+      );
+      err.status = res.status;
+      err.code = payload?.error?.code || payload?.code;
+      err.retryable = Boolean(payload?.error?.retryable);
+      err.details = payload?.error?.details;
+      err.data = payload;
+      throw err;
+    }
+
+    return payload?.data;
+  })();
+
+  if (!canDedup) return run;
+
+  inFlightGets.set(dedupKey, run);
+  try {
+    return await run;
+  } finally {
+    inFlightGets.delete(dedupKey);
   }
-
-  return payload?.data;
 }
 
 // 1. Kesehatan, Autentikasi & Aktivasi Mitra

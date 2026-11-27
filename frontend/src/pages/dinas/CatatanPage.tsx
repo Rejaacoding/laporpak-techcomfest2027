@@ -113,6 +113,17 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
 
   const departments = mapped?.departments ?? [];
   const clusters = mapped?.clusters ?? [];
+  const mapClusters = useMemo(
+    () =>
+      clusters.map((c) => ({
+        id: c.id,
+        label: c.label,
+        count: c.count,
+        lat: c.lat,
+        lng: c.lng,
+      })),
+    [clusters]
+  );
   const kpiStats = mapped?.kpiStats ?? [];
 
   const categoryOptions = useMemo(
@@ -608,13 +619,7 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                   <div className="lg:col-span-8 relative h-[320px] sm:h-[360px] rounded-2xl border border-line overflow-hidden shadow-card">
                     <CivicLeafletMap
-                      clusters={clusters.map((c) => ({
-                        id: c.id,
-                        label: c.label,
-                        count: c.count,
-                        lat: c.lat,
-                        lng: c.lng,
-                      }))}
+                      clusters={mapClusters}
                       ariaLabel="Peta klaster titik rawan kerusakan Sidoarjo dan Surabaya"
                     />
 

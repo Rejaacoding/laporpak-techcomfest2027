@@ -1,6 +1,7 @@
 import { LIMITS } from "../shared/constants.js";
 import { randomMediaKey } from "../lib/crypto.js";
 import { AppError } from "../lib/errors.js";
+import { redis } from "../lib/redis.js";
 import {
   createStorageSignedUrl,
   deleteStorageObjects,
@@ -184,8 +185,18 @@ export async function getSignedNsfwMediaUrl(ticket, type = "before") {
   if (!objectKey) {
     throw new AppError(404, "NOT_FOUND", "Berkas foto tidak ditemukan pada laporan ini.");
   }
+  if (objectKey.startsWith("samples/")) {
+    return { signedUrl: `/${objectKey}`, expiresInSeconds: LIMITS.SIGNED_URL_TTL_SECONDS };
+  }
+  const cacheKey = `cache:signed:${ticket.id}:${type}:${objectKey}`;
+  const cached = await redis.safeGetJson(cacheKey);
+  if (cached?.signedUrl) {
+    return cached;
+  }
   const signedUrl = await createStorageSignedUrl(objectKey, LIMITS.SIGNED_URL_TTL_SECONDS);
-  return { signedUrl, expiresInSeconds: LIMITS.SIGNED_URL_TTL_SECONDS };
+  const payload = { signedUrl, expiresInSeconds: LIMITS.SIGNED_URL_TTL_SECONDS };
+  await redis.safeSetJson(cacheKey, payload, Math.max(15, LIMITS.SIGNED_URL_TTL_SECONDS - 15));
+  return payload;
 }
 
 export async function cleanupStorageKeys(keys) {

@@ -31,7 +31,10 @@ import {
   enforceJuryMutationRateLimit,
 } from "../middlewares/guard.middleware.js";
 import {
+  enforceCaptureNonceRateLimit,
+  enforceCronRateLimit,
   enforceJurySessionBruteForceGuard,
+  enforceRadiusCheckRateLimit,
   enforceSignedMediaRateLimit,
 } from "../middlewares/security.middleware.js";
 
@@ -46,18 +49,18 @@ router.post("/jury/reset", requireJuryToken, enforceJuryMutationRateLimit, juryR
 
 // Aktivasi kerja sama mitra baru (kode sekali pakai, diblokir 403 untuk sesi juri #23) & Vercel Cron harian
 router.post("/aktivasi-mitra", blockJuryPartnerActivation, enforceJurySessionBruteForceGuard, aktivasiMitraController);
-router.get("/cron/sla", cronSlaController);
+router.get("/cron/sla", enforceCronRateLimit, cronSlaController);
 
 // 2. Akses Publik: Peta, Cek Radius Pra-Kamera, Detail, Signed URL, Audit & Rapor (6 endpoint)
 router.get("/tickets", listTicketsController);
-router.get("/tickets/check-radius", checkRadiusController);
+router.get("/tickets/check-radius", enforceRadiusCheckRateLimit, checkRadiusController);
 router.get("/tickets/:id", getTicketDetailController);
 router.get("/tickets/:id/media-signed-url", enforceSignedMediaRateLimit, getMediaSignedUrlController);
 router.get("/tickets/:id/audit-verify", verifyAuditController);
 router.get("/rapor", raporController);
 
 // 3. Kamera & Aksi Warga (4 endpoint)
-router.post("/capture-nonce", requireAuth, captureNonceController);
+router.post("/capture-nonce", requireAuth, enforceCaptureNonceRateLimit, captureNonceController);
 router.post("/tickets", requireRole("WARGA"), enforceJuryMutationRateLimit, createTicketController);
 router.post("/tickets/:id/support", requireRole("WARGA"), enforceJuryMutationRateLimit, supportTicketController);
 router.post("/tickets/:id/validate", requireRole("WARGA"), enforceJuryMutationRateLimit, validateTicketController);
