@@ -16,10 +16,13 @@ import { AuthProvider, useAuth } from "./context/AuthContext.tsx";
 import { CitizenOnly, RequireAuth } from "./components/auth/index.ts";
 import { Button, ToastProvider } from "./components/ui/index.js";
 import LoginPage from "./pages/LoginPage.tsx";
-import LaporPage from "./pages/LaporPage.tsx";
 import DinasDashboardPage from "./app/dinas/page.tsx";
 import DinasPetaPage from "./app/dinas/peta.tsx";
 import DinasRaporPage from "./app/dinas/rapor.tsx";
+import WargaBerandaPage from "./app/warga/page.tsx";
+import WargaPetaPage from "./app/warga/peta.tsx";
+import WargaLaporPage from "./app/warga/lapor.tsx";
+import WargaRaporPage from "./app/warga/rapor.tsx";
 import JuryPanel from "./features/jury/JuryPanel.jsx";
 
 function RouteThemeSync() {
@@ -37,7 +40,13 @@ function TopNav() {
   const { pathname } = useLocation();
   const { user, signOut } = useAuth();
 
-  if (pathname.startsWith("/dinas") || pathname.startsWith("/rapor")) {
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/peta") ||
+    pathname.startsWith("/lapor") ||
+    pathname.startsWith("/dinas") ||
+    pathname.startsWith("/rapor")
+  ) {
     return null;
   }
 
@@ -56,7 +65,7 @@ function TopNav() {
             Peta
           </Link>
           <Link to="/rapor" className="text-fg hover:text-brand">
-            Rapor
+            Catatan Kerja
           </Link>
           <CitizenOnly>
             <Link to="/lapor" className="text-brand font-semibold">
@@ -121,15 +130,8 @@ export default function App() {
             <RouteThemeSync />
             <TopNav />
             <Routes>
-              <Route
-                path="/"
-                element={
-                  <PageShell
-                    title="Peta Laporan Warga"
-                    subtitle="Halaman publik beranda & peta Surabaya–Sidoarjo."
-                  />
-                }
-              />
+              <Route path="/" element={<WargaBerandaPage />} />
+              <Route path="/peta" element={<WargaPetaPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route
                 path="/tiket/:id"
@@ -140,11 +142,8 @@ export default function App() {
                   />
                 }
               />
-              <Route
-                path="/rapor"
-                element={<DinasRaporPage showSidebar={false} />}
-              />
-              <Route path="/lapor" element={<LaporPage />} />
+              <Route path="/rapor" element={<WargaRaporPage />} />
+              <Route path="/lapor" element={<WargaLaporPage />} />
               <Route
                 path="/dinas"
                 element={

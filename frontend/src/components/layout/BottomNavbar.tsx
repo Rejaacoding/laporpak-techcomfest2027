@@ -87,7 +87,7 @@ export function BottomNavbar({
           </button>
         ) : (
           <Link
-            to="/?view=peta"
+            to="/peta"
             aria-current={resolvedActive === "peta" ? "page" : undefined}
             className={tabClass(resolvedActive === "peta")}
           >
@@ -129,7 +129,7 @@ export function BottomNavbar({
           className={tabClass(resolvedActive === "rapor")}
         >
           <BarChart3 className="size-[19px] shrink-0" aria-hidden="true" />
-          <span className="font-sans text-[11px] leading-[14px]">Rapor</span>
+          <span className="font-sans text-[11px] leading-[14px]">Catatan</span>
         </Link>
 
         {/* 5. Profil */}
