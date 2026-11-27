@@ -16,6 +16,7 @@ import {
   listTicketsController,
   makeDinasActionController,
   raporController,
+  rateTicketController,
   supportTicketController,
   validateTicketController,
   verifyAuditController,
@@ -60,6 +61,7 @@ router.post("/capture-nonce", requireAuth, captureNonceController);
 router.post("/tickets", requireRole("WARGA"), enforceJuryMutationRateLimit, createTicketController);
 router.post("/tickets/:id/support", requireRole("WARGA"), enforceJuryMutationRateLimit, supportTicketController);
 router.post("/tickets/:id/validate", requireRole("WARGA"), enforceJuryMutationRateLimit, validateTicketController);
+router.post("/tickets/:id/rate", requireRole("WARGA"), enforceJuryMutationRateLimit, rateTicketController);
 
 // 4. Meja Kerja Instansi ADMIN_DINAS (2 rute grup: antrean + 8 aksi dinas)
 router.get("/dinas/tickets", requireRole("ADMIN_DINAS"), listDinasTicketsController);

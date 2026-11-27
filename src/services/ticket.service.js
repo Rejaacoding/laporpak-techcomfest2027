@@ -296,7 +296,7 @@ export async function createTicket({ req, body }) {
       });
 
       return row;
-    }, { maxWait: 5000, timeout: 15000 });
+    }, { maxWait: 10000, timeout: 30000 });
 
     // Langkah 7: Hapus cache Redis & kembalikan hasil
     await invalidatePublicCaches();
@@ -356,10 +356,26 @@ export async function getTicketDetail({ ticketId, query, user }) {
           validationRound: true,
           type: true,
           weightAtVote: true,
+          effectiveWeight: true,
+          isCollusionSuspect: true,
           distanceMeters: true,
           createdAt: true,
           validatorId: true,
           validator: { select: { aliasName: true } },
+        },
+      },
+      supports: {
+        select: { userId: true, createdAt: true },
+      },
+      ratings: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          userId: true,
+          stars: true,
+          comment: true,
+          createdAt: true,
+          user: { select: { aliasName: true } },
         },
       },
       auditLogs: {
@@ -396,13 +412,48 @@ export async function getTicketDetail({ ticketId, query, user }) {
   const activeConfirmations = ticket.validations.filter(
     (v) => v.validationRound === ticket.validationRound && v.type === "CONFIRM_RESOLVED"
   );
-  const currentWeight = Math.round(activeConfirmations.reduce((acc, v) => acc + v.weightAtVote, 0) * 10) / 10;
+  const validConfirmations = activeConfirmations.filter((v) => (v.effectiveWeight ?? v.weightAtVote) > 0);
+  const currentWeight =
+    Math.round(validConfirmations.reduce((acc, v) => acc + (v.effectiveWeight ?? v.weightAtVote), 0) * 10) / 10;
 
   let validationPhase = null;
+  let elapsedValidationHours = 0;
+  let coolingEndsAt = null;
   if (ticket.status === "PENDING_VALIDATION" && ticket.validationStartedAt) {
-    const elapsedHours = (Date.now() - new Date(ticket.validationStartedAt).getTime()) / (3600 * 1000);
-    validationPhase = elapsedHours >= LIMITS.PUBLIC_VALIDATION_PHASE1_HOURS ? "REPORTER_48_72" : "PUBLIC_0_48";
+    elapsedValidationHours = (Date.now() - new Date(ticket.validationStartedAt).getTime()) / (3600 * 1000);
+    validationPhase = elapsedValidationHours >= LIMITS.PUBLIC_VALIDATION_PHASE1_HOURS ? "REPORTER_48_72" : "PUBLIC_0_48";
+    coolingEndsAt = new Date(
+      new Date(ticket.validationStartedAt).getTime() + LIMITS.PUBLIC_COOLING_WINDOW_HOURS * 3600 * 1000
+    ).toISOString();
   }
+
+  const earlySupporterIds = new Set(
+    (ticket.supports || [])
+      .filter((s) => !ticket.repairCapturedAt || new Date(s.createdAt) <= new Date(ticket.repairCapturedAt))
+      .map((s) => s.userId)
+  );
+  const hasEarlySupporter = validConfirmations.some((v) => earlySupporterIds.has(v.validatorId));
+  const useTightTarget = validationPhase === "PUBLIC_0_48" && !hasEarlySupporter;
+  const targetWeight = useTightTarget ? LIMITS.NO_ANCHOR_QUORUM_MIN_WEIGHT : LIMITS.QUORUM_MIN_WEIGHT;
+  const minValidators = useTightTarget ? LIMITS.NO_ANCHOR_QUORUM_MIN_VALIDATORS : LIMITS.QUORUM_MIN_VALIDATORS;
+  const isCoolingHold =
+    ticket.status === "PENDING_VALIDATION" &&
+    elapsedValidationHours < LIMITS.PUBLIC_COOLING_WINDOW_HOURS &&
+    currentWeight >= targetWeight &&
+    validConfirmations.length >= minValidators;
+
+  const ratingItems = (ticket.ratings || []).map((r) => ({
+    id: r.id,
+    stars: r.stars,
+    comment: r.comment,
+    citizenAlias: r.user?.aliasName || "Warga",
+    createdAt: r.createdAt,
+  }));
+  const ratingAverage =
+    ratingItems.length > 0
+      ? Math.round((ratingItems.reduce((s, r) => s + r.stars, 0) / ratingItems.length) * 10) / 10
+      : null;
+  const hasRated = Boolean(user && (ticket.ratings || []).some((r) => r.userId === user.id));
 
   const uiFlags = await buildUiFlags({ ticket, user, userDistanceMeters, queryAccuracy: query.accuracy, validationPhase });
 
@@ -424,6 +475,7 @@ export async function getTicketDetail({ ticketId, query, user }) {
     afterPhotoUrl: ticket.afterPhotoUrl,
     repairCapturedAt: ticket.repairCapturedAt,
     repairDistanceMeters: ticket.repairDistanceMeters,
+    isFastResolveAnomaly: ticket.isFastResolveAnomaly,
     beritaAcaraUrl: ticket.beritaAcaraUrl,
     isNsfwPendingReview: ticket.isNsfwPendingReview,
     isLowQualityOverride: ticket.isLowQualityOverride,
@@ -432,6 +484,7 @@ export async function getTicketDetail({ ticketId, query, user }) {
     slaDeadline: ticket.slaDeadline,
     remainingSlaMs: ticket.remainingSlaMs,
     validationStartedAt: ticket.validationStartedAt,
+    coolingEndsAt,
     disputedAt: ticket.disputedAt,
     validationRound: ticket.validationRound,
     disputeCount: ticket.disputeCount,
@@ -447,10 +500,20 @@ export async function getTicketDetail({ ticketId, query, user }) {
     isDemoData: ticket.isDemoData,
     quorum: {
       currentWeight,
-      targetWeight: LIMITS.QUORUM_MIN_WEIGHT,
-      uniqueValidators: activeConfirmations.length,
-      minValidators: LIMITS.QUORUM_MIN_VALIDATORS,
+      targetWeight,
+      uniqueValidators: validConfirmations.length,
+      minValidators,
+      hasEarlySupporter,
+      isCoolingHold,
+      coolingEndsAt,
       phase: validationPhase,
+    },
+    ratings: {
+      average: ratingAverage,
+      count: ratingItems.length,
+      hasRated,
+      canRate: Boolean(user && user.role === "WARGA" && ticket.status === "CLOSED" && !hasRated),
+      items: ratingItems,
     },
     timeline: ticket.auditLogs.map((l) => ({
       id: l.id,
@@ -678,7 +741,7 @@ export async function supportTicket({ req, ticketId }) {
       slaCutApplied,
       highPenaltyActive: updated.supportCount >= LIMITS.SUPPORT_STEP_SIZE,
     };
-  });
+  }, { maxWait: 10000, timeout: 30000 });
 
   await invalidatePublicCaches();
   return result;

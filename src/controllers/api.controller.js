@@ -9,6 +9,7 @@ import {
   mediaSignedUrlQuerySchema,
   outOfScopeBodySchema,
   raporQuerySchema,
+  rateTicketBodySchema,
   rejectSpamBodySchema,
   resolveEscalatedBodySchema,
   resolveTicketBodySchema,
@@ -33,7 +34,7 @@ import {
 } from "../services/ticket.service.js";
 import { validateTicket } from "../services/validation.service.js";
 import { executeDinasAction, listDinasTickets } from "../services/dinas.service.js";
-import { getRaporData } from "../services/rapor.service.js";
+import { getRaporData, rateClosedTicket } from "../services/rapor.service.js";
 import {
   createJurySession,
   resetDemoData,
@@ -182,6 +183,16 @@ export async function raporController(req, res, next) {
     const query = raporQuerySchema.parse(req.query || {});
     const data = await getRaporData(query);
     return okResponse(res, data);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function rateTicketController(req, res, next) {
+  try {
+    const body = rateTicketBodySchema.parse(req.body || {});
+    const data = await rateClosedTicket({ req, ticketId: req.params.id, body });
+    return okResponse(res, data, "Rating kepuasan dan ulasanmu berhasil dicatat.", 201);
   } catch (err) {
     return next(err);
   }

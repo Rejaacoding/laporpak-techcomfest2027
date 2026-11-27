@@ -325,25 +325,38 @@ async function runTests() {
 
   // Round 1 disputer BLOCKED from voting in appeal round (#1/#16)
   const blockedDisputer = await req("POST", `/api/tickets/${newTicketId}/validate`, {
-    headers: { "X-Dev-User-Id": "demo-warga-validator", "X-Device-Fingerprint": fpVal1 },
+    headers: { "X-Dev-User-Id": "demo-warga-validator", "X-Device-Fingerprint": fpVal1, "X-Forwarded-For": "10.10.1.5" },
     body: { type: "CONFIRM_RESOLVED", lat: -7.4301, lng: 112.7101, gpsAccuracyMeters: 10 },
   });
   assert.equal(blockedDisputer.status, 403);
 
-  // Two OTHER citizens confirm (>=2.0 weight & >=2 distinct accounts/fingerprints) -> CLOSED + penalize Round 1 disputer (#20)
+  // Advance validationStartedAt > 6h so appeal round tests quorum close cleanly (PRD v3.5 #33 tested explicitly in Suite 17)
+  await prisma.ticket.update({
+    where: { id: newTicketId },
+    data: { validationStartedAt: new Date(Date.now() - 7 * 3600 * 1000) },
+  });
+
+  // Three non-anchor OTHER citizens confirm (>=3.0 weight & >=3 distinct accounts/fingerprints per PRD v3.5 #34) -> CLOSED + penalize Round 1 disputer (#20)
   const v1 = await req("POST", `/api/tickets/${newTicketId}/validate`, {
-    headers: { "X-Dev-User-Id": "demo-warga-2", "X-Device-Fingerprint": "fp-w2" },
+    headers: { "X-Dev-User-Id": "demo-warga-2", "X-Device-Fingerprint": "fp-w2", "X-Forwarded-For": "10.20.2.5" },
     body: { type: "CONFIRM_RESOLVED", lat: -7.4301, lng: 112.7101, gpsAccuracyMeters: 10 },
   });
   assert.equal(v1.status, 200);
   assert.equal(v1.json.data.closed, false);
 
   const v2 = await req("POST", `/api/tickets/${newTicketId}/validate`, {
-    headers: { "X-Dev-User-Id": "demo-warga-3", "X-Device-Fingerprint": "fp-w3" },
+    headers: { "X-Dev-User-Id": "demo-warga-3", "X-Device-Fingerprint": "fp-w3", "X-Forwarded-For": "10.30.3.5" },
     body: { type: "CONFIRM_RESOLVED", lat: -7.4301, lng: 112.7101, gpsAccuracyMeters: 10 },
   });
   assert.equal(v2.status, 200);
-  assert.equal(v2.json.data.status, "CLOSED");
+  assert.equal(v2.json.data.closed, false, "Without early supporter anchor, 2 citizens must still wait for 3rd (#34)");
+
+  const v3 = await req("POST", `/api/tickets/${newTicketId}/validate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-4", "X-Device-Fingerprint": "fp-w4", "X-Forwarded-For": "10.40.4.5" },
+    body: { type: "CONFIRM_RESOLVED", lat: -7.4301, lng: 112.7101, gpsAccuracyMeters: 10 },
+  });
+  assert.equal(v3.status, 200);
+  assert.equal(v3.json.data.status, "CLOSED");
 
   const penalizedVal = await prisma.user.findUnique({ where: { id: "demo-warga-validator" } });
   assert.equal(penalizedVal.trustScore, 0.6, "Disputer losing appeal round must drop 1.1 -> 0.6 (#20)");
@@ -762,9 +775,131 @@ async function runTests() {
   const cronRes = await req("GET", "/api/cron/sla");
   assert.equal(cronRes.status, 200);
   assert.ok(cronRes.json.data.evaluatedAt);
-  console.log("PASS [16/16] 16 Calibrated Sample Photos (#32), Single-Use /api/aktivasi-mitra (US-002) & /api/cron/sla (US-004)");
+  console.log("PASS [16/17] 16 Calibrated Sample Photos (#32), Single-Use /api/aktivasi-mitra (US-002) & /api/cron/sla (US-004)");
 
-  console.log("\nALL 16 END-TO-END BACKEND & SECURITY SUITES PASSED (ZERO ERRORS).");
+  // 17. PRD v3.5 Penguatan Anti-Buzzer 3 Lapis (#33-#35), Fast-Resolve Anomaly (#36) & Rating Bintang (#37)
+  await seedDemoData(prisma, { resetOnlyDemo: true });
+  await redis.deleteByPrefix("cache:");
+  await redis.del("lazy:batch:throttle");
+
+  // Create fresh ticket & resolve < 10 min from officer IP 198.51.100.10 -> triggers isFastResolveAnomaly (#36)
+  const nonceV35Create = await getNonce("demo-warga-pelapor", "fp-v35-rep", "CREATE_TICKET");
+  const tktV35 = await req("POST", "/api/tickets", {
+    headers: {
+      "X-Dev-User-Id": "demo-warga-pelapor",
+      "X-Device-Fingerprint": "fp-v35-rep",
+      "X-Forwarded-For": "203.0.113.10",
+      "Idempotency-Key": `idem-v35-${Date.now()}`,
+    },
+    body: {
+      title: "Uji Anti-Buzzer v3.5 Lubang Jalan Sidoarjo",
+      description: "Pengujian otomatis 3 lapis anti-buzzer dan deteksi selesai kilat.",
+      category: "JALAN_BERLUBANG",
+      lat: -7.4415,
+      lng: 112.7195,
+      gpsAccuracyMeters: 12,
+      captureNonce: nonceV35Create,
+      photoBase64: VALID_WEBP_B64,
+    },
+  });
+  assert.equal(tktV35.status, 201);
+  const v35Id = tktV35.json.data.id;
+
+  const procV35 = await req("POST", `/api/tickets/${v35Id}/process`, {
+    headers: { "X-Dev-User-Id": "demo-admin-dpu", "X-Device-Fingerprint": "fp-v35-dpu", "X-Forwarded-For": "198.51.100.10" },
+  });
+  assert.equal(procV35.status, 200);
+
+  const nonceV35Res = await getNonce("demo-admin-dpu", "fp-v35-dpu", "RESOLVE_TICKET", v35Id);
+  const resV35 = await req("POST", `/api/tickets/${v35Id}/resolve`, {
+    headers: { "X-Dev-User-Id": "demo-admin-dpu", "X-Device-Fingerprint": "fp-v35-dpu", "X-Forwarded-For": "198.51.100.10" },
+    body: {
+      lat: -7.4415,
+      lng: 112.7195,
+      gpsAccuracyMeters: 12,
+      captureNonce: nonceV35Res,
+      photoBase64: VALID_WEBP_B64,
+    },
+  });
+  assert.equal(resV35.status, 200);
+  assert.equal(resV35.json.data.isFastResolveAnomaly, true, "Fast resolve <10m must flag isFastResolveAnomaly (#36)");
+
+  // Benteng 3 (#35): Validator on SAME IP subnet (198.51.100.99) < 5 min -> shadow-zeroed (0.0 weight)
+  const colludeVote = await req("POST", `/api/tickets/${v35Id}/validate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-validator", "X-Device-Fingerprint": "fp-v35-col", "X-Forwarded-For": "198.51.100.99" },
+    body: { type: "CONFIRM_RESOLVED", lat: -7.4415, lng: 112.7195, gpsAccuracyMeters: 10 },
+  });
+  assert.equal(colludeVote.status, 200);
+  assert.equal(colludeVote.json.data.isCollusionSuspect, true, "Same-subnet <5m validator must be flagged (#35)");
+  assert.equal(colludeVote.json.data.quorumWeight, 0, "Collusion suspect vote must be shadow-zeroed to 0.0 (#35)");
+
+  // Benteng 2 (#34): No early supporter -> 2 clean non-anchor voters (1.3 + 1.0 = 2.3) still need targetWeight 3.0 & 3 voters
+  const cleanV1 = await req("POST", `/api/tickets/${v35Id}/validate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-2", "X-Device-Fingerprint": "fp-v35-c1", "X-Forwarded-For": "203.0.113.21" },
+    body: { type: "CONFIRM_RESOLVED", lat: -7.4415, lng: 112.7195, gpsAccuracyMeters: 10 },
+  });
+  assert.equal(cleanV1.status, 200);
+  assert.equal(cleanV1.json.data.targetWeight, 3.0, "Phase 1 without early supporter must require 3.0 weight (#34)");
+
+  const cleanV2 = await req("POST", `/api/tickets/${v35Id}/validate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-3", "X-Device-Fingerprint": "fp-v35-c2", "X-Forwarded-For": "203.0.113.22" },
+    body: { type: "CONFIRM_RESOLVED", lat: -7.4415, lng: 112.7195, gpsAccuracyMeters: 10 },
+  });
+  assert.equal(cleanV2.status, 200);
+  assert.equal(cleanV2.json.data.closed, false, "2 non-anchor voters must not close ticket (#34)");
+  assert.equal(cleanV2.json.data.coolingHold, false);
+
+  // Benteng 1 (#33): 3rd clean voter reaches 3.7 >= 3.0 & 3 validators -> HELD by 6-hour cooling window!
+  const cleanV3 = await req("POST", `/api/tickets/${v35Id}/validate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-4", "X-Device-Fingerprint": "fp-v35-c3", "X-Forwarded-For": "203.0.113.23" },
+    body: { type: "CONFIRM_RESOLVED", lat: -7.4415, lng: 112.7195, gpsAccuracyMeters: 10 },
+  });
+  assert.equal(cleanV3.status, 200);
+  assert.equal(cleanV3.json.data.status, "PENDING_VALIDATION", "Ticket must stay held during 6h cooling window (#33)");
+  assert.equal(cleanV3.json.data.coolingHold, true, "coolingHold must be true when quorum met <6h (#33)");
+
+  // After 6h elapsed -> Lazy Evaluation auto-finalizes held quorum to CLOSED
+  await prisma.ticket.update({
+    where: { id: v35Id },
+    data: { validationStartedAt: new Date(Date.now() - 6.5 * 3600 * 1000) },
+  });
+  const detailAfter6h = await req("GET", `/api/tickets/${v35Id}`);
+  assert.equal(detailAfter6h.status, 200);
+  assert.equal(detailAfter6h.json.data.status, "CLOSED", "Lazy eval must auto-close held quorum after 6h (#33)");
+  assert.equal(detailAfter6h.json.data.isFastResolveAnomaly, true);
+
+  // #37: Rating Bintang Warga on CLOSED ticket + duplicate block + OPEN block + /api/rapor aggregation
+  const rateOpen = await req("POST", "/api/tickets/seed-tkt-01/rate", {
+    headers: { "X-Dev-User-Id": "demo-warga-pelapor" },
+    body: { stars: 5, comment: "Harusnya ditolak karena belum tuntas." },
+  });
+  assert.equal(rateOpen.status, 409, "Cannot rate non-CLOSED ticket (#37)");
+
+  const rateOk = await req("POST", `/api/tickets/${v35Id}/rate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-pelapor" },
+    body: { stars: 5, comment: "Tambalan aspal rapi dan cepat ditangani petugas." },
+  });
+  assert.equal(rateOk.status, 201);
+  assert.equal(rateOk.json.data.stars, 5);
+
+  const rateDup = await req("POST", `/api/tickets/${v35Id}/rate`, {
+    headers: { "X-Dev-User-Id": "demo-warga-pelapor" },
+    body: { stars: 4, comment: "Coba rating dua kali." },
+  });
+  assert.equal(rateDup.status, 409, "Duplicate rating on same ticket must return 409 (#37)");
+
+  const raporV35 = await req("GET", "/api/rapor");
+  assert.equal(raporV35.status, 200);
+  const dpuCard = raporV35.json.data.departments.find((d) => d.id === "DPU");
+  assert.ok(dpuCard && dpuCard.ratingCount >= 1 && dpuCard.averageRating >= 4, "GET /api/rapor must aggregate real citizen ratings (#37)");
+  assert.ok(Array.isArray(dpuCard.recentRatings) && dpuCard.recentRatings.length >= 1);
+
+  // Reset demo data cleanly back to seeded state at the end
+  await seedDemoData(prisma, { resetOnlyDemo: true });
+  await redis.deleteByPrefix("cache:");
+  console.log("PASS [17/17] PRD v3.5 Anti-Buzzer 3-Layer (#33-#35), Fast-Resolve (#36) & Citizen Ratings (#37)");
+
+  console.log("\nALL 17 END-TO-END BACKEND & SECURITY SUITES PASSED (ZERO ERRORS).");
 }
 
 runTests()

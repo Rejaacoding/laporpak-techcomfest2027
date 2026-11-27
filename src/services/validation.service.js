@@ -82,6 +82,34 @@ export async function validateTicket({ req, ticketId, body }) {
     }
   }
 
+  // Pra-hitung riwayat perilaku warga untuk #35 di luar transaksi agar tidak membebani durasi lock DB
+  let sleeperHistoryFlag = false;
+  if (body.type === "CONFIRM_RESOLVED" && !req.isJuryMode) {
+    const ticketMeta = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { departmentId: true },
+    });
+    if (ticketMeta) {
+      const [priorSameDeptVotes, validOwnReports] = await Promise.all([
+        prisma.ticketValidation.count({
+          where: {
+            validatorId: user.id,
+            type: "CONFIRM_RESOLVED",
+            ticket: { departmentId: ticketMeta.departmentId },
+          },
+        }),
+        prisma.ticket.count({
+          where: {
+            reporterId: user.id,
+            status: { not: "REJECTED_SPAM" },
+          },
+        }),
+      ]);
+      sleeperHistoryFlag =
+        priorSameDeptVotes >= LIMITS.COLLUSION_REPEAT_THRESHOLD - 1 && validOwnReports === 0;
+    }
+  }
+
   try {
     const result = await prisma.$transaction(async (tx) => {
       const ticket = await lockTicketForUpdate(tx, ticketId);
@@ -169,6 +197,26 @@ export async function validateTicket({ req, ticketId, body }) {
         throw new AppError(409, "VERSION_CONFLICT", "Akun atau perangkat ini sudah memberi suara pada putaran aktif.");
       }
 
+      // PRD v3.5 #35: Behavioral Collusion Guard (non-jury & non-reporterFreeConfirm)
+      let isCollusionSuspect = false;
+      let effectiveWeight = user.trustScore;
+      if (body.type === "CONFIRM_RESOLVED" && !isReporterFreeConfirm && !req.isJuryMode) {
+        const elapsedMinutesSinceResolve = ticket.validationStartedAt
+          ? (Date.now() - new Date(ticket.validationStartedAt).getTime()) / 60000
+          : 999;
+        const sameSubnetFast = Boolean(
+          ticket.resolvedIpSubnet &&
+            req.ipSubnetHash &&
+            ticket.resolvedIpSubnet === req.ipSubnetHash &&
+            elapsedMinutesSinceResolve < LIMITS.COLLUSION_FAST_WINDOW_MINUTES
+        );
+
+        if (sameSubnetFast || sleeperHistoryFlag) {
+          isCollusionSuspect = true;
+          effectiveWeight = 0.0;
+        }
+      }
+
       await tx.ticketValidation.create({
         data: {
           ticketId: ticket.id,
@@ -176,7 +224,10 @@ export async function validateTicket({ req, ticketId, body }) {
           validationRound: ticket.validationRound,
           type: body.type,
           weightAtVote: user.trustScore,
+          effectiveWeight,
           deviceFingerprint: req.deviceFingerprint,
+          ipSubnetHash: req.ipSubnetHash || null,
+          isCollusionSuspect,
           evidencePhotoUrl: uploadedEvidence?.publicUrl || null,
           evidencePhotoKey: uploadedEvidence?.key || null,
           gpsAccuracyMeters: body.gpsAccuracyMeters ?? 0,
@@ -194,34 +245,95 @@ export async function validateTicket({ req, ticketId, body }) {
 
       // === CABANG 1: SUDAH BERES (CONFIRM_RESOLVED) ===
       if (body.type === "CONFIRM_RESOLVED") {
-        const roundConfirmations = await tx.ticketValidation.findMany({
-          where: {
-            ticketId: ticket.id,
-            validationRound: ticket.validationRound,
-            type: "CONFIRM_RESOLVED",
-          },
-        });
-        const totalWeight = roundConfirmations.reduce((sum, v) => sum + v.weightAtVote, 0);
-        const quorumMet =
-          isReporterFreeConfirm ||
-          (totalWeight >= LIMITS.QUORUM_MIN_WEIGHT && roundConfirmations.length >= LIMITS.QUORUM_MIN_VALIDATORS);
+        const [roundConfirmations, allEarlySupports] = await Promise.all([
+          tx.ticketValidation.findMany({
+            where: {
+              ticketId: ticket.id,
+              validationRound: ticket.validationRound,
+              type: "CONFIRM_RESOLVED",
+            },
+          }),
+          tx.ticketSupport.findMany({
+            where: {
+              ticketId: ticket.id,
+              ...(ticket.repairCapturedAt
+                ? { createdAt: { lte: ticket.repairCapturedAt } }
+                : {}),
+            },
+            select: { userId: true },
+          }),
+        ]);
+        const validConfirmations = roundConfirmations.filter(
+          (v) => (v.effectiveWeight ?? v.weightAtVote) > 0
+        );
+        const totalWeight = validConfirmations.reduce(
+          (sum, v) => sum + (v.effectiveWeight ?? v.weightAtVote),
+          0
+        );
 
-        if (!quorumMet) {
+        // PRD v3.5 #34: Jangkar Saksi Awal di Fase 1 (non-juri)
+        const earlySupporterIds = new Set(allEarlySupports.map((s) => s.userId));
+        const hasEarlySupporter = validConfirmations.some((v) =>
+          earlySupporterIds.has(v.validatorId)
+        );
+
+        const useTightQuorum = !isReporterFreeConfirm && !req.isJuryMode && !isPhase2 && !hasEarlySupporter;
+        const requiredWeight = useTightQuorum
+          ? LIMITS.NO_ANCHOR_QUORUM_MIN_WEIGHT
+          : LIMITS.QUORUM_MIN_WEIGHT;
+        const requiredValidators = useTightQuorum
+          ? LIMITS.NO_ANCHOR_QUORUM_MIN_VALIDATORS
+          : LIMITS.QUORUM_MIN_VALIDATORS;
+
+        const quorumReached =
+          isReporterFreeConfirm ||
+          (totalWeight >= requiredWeight && validConfirmations.length >= requiredValidators);
+
+        // PRD v3.5 #33: Masa Tunggu Eksposur Publik Minimum 6 Jam (di-bypass pada sesi Juri)
+        const coolingEndsAt = ticket.validationStartedAt
+          ? new Date(
+              new Date(ticket.validationStartedAt).getTime() +
+                LIMITS.PUBLIC_COOLING_WINDOW_HOURS * 3600 * 1000
+            )
+          : null;
+        const coolingHold =
+          quorumReached &&
+          !isReporterFreeConfirm &&
+          !req.isJuryMode &&
+          elapsedHours < LIMITS.PUBLIC_COOLING_WINDOW_HOURS;
+
+        if (!quorumReached || coolingHold) {
+          const auditNote = isCollusionSuspect
+            ? `Indikasi kolusi terdeteksi — suara dicatat transparan dengan bobot efektif 0.0 (${totalWeight.toFixed(1)} / ${requiredWeight.toFixed(1)} poin).`
+            : coolingHold
+              ? `Kuorum warga terpenuhi (${totalWeight.toFixed(1)} poin, ${validConfirmations.length} warga) — menunggu masa tayang publik minimal ${LIMITS.PUBLIC_COOLING_WINDOW_HOURS} jam sebelum dikunci.`
+              : `Validasi 'Sudah Beres' tercatat (${totalWeight.toFixed(1)} / ${requiredWeight.toFixed(1)} poin, ${validConfirmations.length} warga sah).`;
+
           await appendAuditLog(tx, {
             ticketId: ticket.id,
             actorId: user.id,
             actorRole: "WARGA",
             actorDisplayLabel: user.aliasName,
-            action: "VOTE_CONFIRM_RESOLVED",
+            action: isCollusionSuspect
+              ? "VOTE_COLLUSION_ZEROED"
+              : coolingHold
+                ? "VOTE_QUORUM_COOLING_HOLD"
+                : "VOTE_CONFIRM_RESOLVED",
             fromStatus: "PENDING_VALIDATION",
             toStatus: "PENDING_VALIDATION",
-            note: `Validasi 'Sudah Beres' tercatat (${totalWeight.toFixed(1)} / 2.0 poin, ${roundConfirmations.length} warga).`,
+            note: auditNote,
           });
           return {
             status: "PENDING_VALIDATION",
             closed: false,
+            coolingHold,
+            coolingEndsAt: coolingEndsAt ? coolingEndsAt.toISOString() : null,
             quorumWeight: Math.round(totalWeight * 10) / 10,
-            uniqueValidators: roundConfirmations.length,
+            targetWeight: requiredWeight,
+            uniqueValidators: validConfirmations.length,
+            minValidators: requiredValidators,
+            hasEarlySupporter,
+            isCollusionSuspect,
           };
         }
 
@@ -245,14 +357,14 @@ export async function validateTicket({ req, ticketId, body }) {
           { totalResolved: 1, onTimeResolved: cleanOnTime ? 1 : 0 }
         );
 
-        // Hadiah +0.1 trustScore (plus loncatan 0.5 -> 1.0) untuk pelapor & validator aktif
-        const rewardIds = new Set([ticket.reporterId, ...roundConfirmations.map((v) => v.validatorId)]);
+        // Hadiah +0.1 trustScore hanya untuk pelapor & validator sah (effectiveWeight > 0)
+        const rewardIds = new Set([ticket.reporterId, ...validConfirmations.map((v) => v.validatorId)]);
         for (const uid of rewardIds) {
           await applyTrustReward(tx, uid);
         }
 
-        // PRD v3.4 #1/#20: Penalti pembantah Putaran 1 HANYA jika isAppealRound == true dan ditutup oleh >=2 warga lain
-        if (ticket.isAppealRound && !isReporterFreeConfirm && roundConfirmations.length >= 2) {
+        // PRD v3.4 #1/#20: Penalti pembantah Putaran 1 HANYA jika isAppealRound == true dan ditutup oleh >=2 warga sah lain
+        if (ticket.isAppealRound && !isReporterFreeConfirm && validConfirmations.length >= 2) {
           const prevDisputer = await tx.ticketValidation.findFirst({
             where: {
               ticketId: ticket.id,
@@ -280,14 +392,18 @@ export async function validateTicket({ req, ticketId, body }) {
           toStatus: "CLOSED",
           note: isReporterFreeConfirm
             ? "Pelapor Utama mengonfirmasi perbaikan tuntas (jendela 48–72 jam)."
-            : `Kuorum warga terpenuhi (${totalWeight.toFixed(1)} poin, ${roundConfirmations.length} warga) — laporan tuntas.`,
+            : `Kuorum warga terpenuhi (${totalWeight.toFixed(1)} poin, ${validConfirmations.length} warga) — laporan tuntas.`,
         });
 
         return {
           status: "CLOSED",
           closed: true,
+          coolingHold: false,
           quorumWeight: Math.round(totalWeight * 10) / 10,
-          uniqueValidators: roundConfirmations.length,
+          targetWeight: requiredWeight,
+          uniqueValidators: validConfirmations.length,
+          hasEarlySupporter,
+          isCollusionSuspect,
         };
       }
 
@@ -334,7 +450,7 @@ export async function validateTicket({ req, ticketId, body }) {
         disputeCount: nextDisputeCount,
         escalated: isEscalated,
       };
-    }, { maxWait: 5000, timeout: 15000 });
+    }, { maxWait: 10000, timeout: 30000 });
 
     await invalidatePublicCaches();
     return result;

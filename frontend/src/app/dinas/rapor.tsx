@@ -9,6 +9,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Siren,
+  Star,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
 import { DinasSidebar } from "../../components/layout/index.ts";
@@ -21,6 +22,15 @@ import { humanizeError } from "../../lib/humanize.js";
 export interface DinasRaporPageProps {
   /** Tampilkan DinasSidebar saat diakses admin dinas (/dinas/rapor) */
   showSidebar?: boolean;
+}
+
+interface RecentRatingItem {
+  id: string;
+  stars: number;
+  comment: string;
+  citizenAlias: string;
+  ticketCode: string;
+  createdAt: string;
 }
 
 interface DepartmentCardData {
@@ -43,6 +53,9 @@ interface DepartmentCardData {
   rejectedSpamCount: number;
   rejectedSpamRatio: number;
   rejectedSpamWarning: boolean;
+  averageRating?: number | null;
+  ratingCount?: number;
+  recentRatings?: RecentRatingItem[];
 }
 
 interface ClusterPoint {
@@ -439,12 +452,26 @@ export function DinasRaporPage({ showSidebar = false }: DinasRaporPageProps) {
                               </strong>
                             </div>
                             <div>
-                              <span className="text-fg-muted block">Lewat waktu</span>
-                              <strong className="font-mono text-fg tabular-nums">
-                                {d.overdueCount} kali
+                              <span className="text-fg-muted block">Rating warga</span>
+                              <strong className="inline-flex items-center gap-1 font-mono text-fg tabular-nums">
+                                <Star className="size-3.5 text-amber-400 fill-amber-400 shrink-0" aria-hidden="true" />
+                                {d.averageRating !== null && d.averageRating !== undefined
+                                  ? `${d.averageRating}/5 (${d.ratingCount || 0})`
+                                  : "Belum ada"}
                               </strong>
                             </div>
                           </div>
+
+                          {d.recentRatings && d.recentRatings.length > 0 && (
+                            <div className="rounded-xl bg-surface-2/80 border border-line px-3 py-2 text-xs space-y-1">
+                              <p className="text-fg italic line-clamp-2">
+                                &ldquo;{d.recentRatings[0].comment}&rdquo;
+                              </p>
+                              <p className="font-mono text-[11px] text-fg-muted">
+                                {d.recentRatings[0].citizenAlias} · {d.recentRatings[0].ticketCode}
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 pt-1">
