@@ -14,14 +14,19 @@ import {
   MapSkeleton,
   useToast,
 } from "../../components/ui/index.js";
+import {
+  CivicLeafletMap,
+  type MapFocusTarget,
+} from "../../components/map/CivicLeafletMap.tsx";
+import { useLiveSync } from "../../hooks/useLiveSync.ts";
 import { listTickets, onJuryEvent } from "../../services/api.js";
 import {
   distanceMeters,
   mapPublicTicketsToWargaPins,
-  mapRaporResponse,
+  type ApiPublicTicket,
+  type WargaMapPinView,
 } from "../../utils/ticketMappers.ts";
-import type { WargaMapPinView } from "../../utils/ticketMappers.ts";
-import { CATEGORIES, TICKET_STATUSES } from "../../constants/designTokens.js";
+import { CATEGORIES } from "../../constants/designTokens.js";
 
 const SLA_TEXT_CLASS: Record<WargaMapPinView["slaTone"], string> = {
   overdue: "text-semantic-error",
@@ -37,19 +42,20 @@ interface UserCoords {
 }
 
 /**
- * Peta Detail Warga (/peta) — live `/api/tickets` pins, clusters, and inspector sheet.
+ * Peta Detail Warga (/peta) - real interactive Leaflet map, live sync, and inspector sheet.
  */
 export function WargaPetaPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
 
-  const [tickets, setTickets] = useState<WargaMapPinView[]>([]);
+  const [rawTickets, setRawTickets] = useState<ApiPublicTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<string>("Semua");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [userCoords, setUserCoords] = useState<UserCoords | null>(null);
+  const [focusTarget, setFocusTarget] = useState<MapFocusTarget | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
 
   const loadTickets = useCallback(
@@ -58,11 +64,11 @@ export function WargaPetaPage() {
       setError(null);
       try {
         const data = await listTickets();
-        const mapped = mapPublicTicketsToWargaPins(data);
-        setTickets(mapped);
-        setSelectedId((current) => current || mapped[0]?.id || null);
+        const list = Array.isArray(data) ? data : [];
+        setRawTickets(list);
+        setSelectedId((current) => current || list[0]?.id || null);
       } catch (err) {
-        setError(err);
+        if (!silent) setError(err);
         if (silent) showToast({ type: "error", error: err });
       } finally {
         setLoading(false);
@@ -71,12 +77,18 @@ export function WargaPetaPage() {
     [showToast]
   );
 
+  const { nowMs, syncLabel, markSynced } = useLiveSync({
+    onRefresh: () => loadTickets({ silent: true }),
+    intervalMs: 25_000,
+    realtimeTable: "Ticket",
+  });
+
   useEffect(() => {
-    loadTickets();
+    loadTickets().then(markSynced).catch(() => {});
   }, [loadTickets]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadTickets({ silent: true })),
+    () => onJuryEvent("reset", () => loadTickets({ silent: true }).then(markSynced)),
     [loadTickets]
   );
 
@@ -87,10 +99,16 @@ export function WargaPetaPage() {
         const lng = Number(coords?.lng);
         if (Number.isFinite(lat) && Number.isFinite(lng)) {
           setUserCoords({ lat, lng });
+          setFocusTarget({ lat, lng, zoom: 14, seq: Date.now() });
           showToast({ type: "info", message: "Lokasi simulasi juri diterapkan." });
         }
       }),
     [showToast]
+  );
+
+  const tickets = useMemo(
+    () => mapPublicTicketsToWargaPins(rawTickets, nowMs),
+    [rawTickets, nowMs]
   );
 
   const categoryOptions = useMemo(() => {
@@ -134,20 +152,19 @@ export function WargaPetaPage() {
   const selectedPin =
     visiblePins.find((pin) => pin.id === selectedId) || visiblePins[0] || null;
 
-  const clusters = useMemo(() => {
-    if (visiblePins.length === 0) return [];
-    const mapped = mapRaporResponse({
-      departments: [],
-      clusterPoints: visiblePins.map((pin) => ({
+  const mapPins = useMemo(
+    () =>
+      visiblePins.map((pin) => ({
         id: pin.id,
-        category: pin.category,
+        title: pin.title,
+        code: pin.code,
+        displayCode: pin.displayCode,
         status: pin.status,
-        lat: pin.publicLat ?? Number.NaN,
-        lng: pin.publicLng ?? Number.NaN,
+        lat: pin.publicLat,
+        lng: pin.publicLng,
       })),
-    });
-    return mapped.clusters.filter((cluster) => cluster.count >= 2).slice(0, 3);
-  }, [visiblePins]);
+    [visiblePins]
+  );
 
   const focusGps = useCallback(() => {
     if (!navigator.geolocation) {
@@ -161,10 +178,12 @@ export function WargaPetaPage() {
     setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setUserCoords({
+        const next = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-        });
+        };
+        setUserCoords(next);
+        setFocusTarget({ lat: next.lat, lng: next.lng, zoom: 14, seq: Date.now() });
         setGpsLoading(false);
         showToast({
           type: "success",
@@ -210,7 +229,7 @@ export function WargaPetaPage() {
             className="!bg-bg min-h-11"
           />
 
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 md:pb-0">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 md:pb-0 flex-1">
             {categoryOptions.map((category) => (
               <Button
                 key={category.code}
@@ -223,29 +242,16 @@ export function WargaPetaPage() {
               </Button>
             ))}
           </div>
+
+          <span className="hidden xl:inline-flex items-center gap-1.5 text-[11px] font-mono text-fg-muted shrink-0">
+            <span className="size-2 rounded-full bg-green-600" aria-hidden="true" />
+            {syncLabel}
+          </span>
         </div>
       </div>
 
-      <main className="relative flex-1 min-h-[540px] bg-[#EDF2EA] overflow-hidden">
+      <main className="relative flex-1 min-h-[540px] bg-surface-2 overflow-hidden">
         <h1 className="sr-only">Peta Laporan Warga</h1>
-        <svg
-          viewBox="0 0 380 560"
-          preserveAspectRatio="none"
-          className="absolute inset-0 size-full pointer-events-none"
-          aria-hidden="true"
-        >
-          <path d="M200 -40 L260 560" stroke="#CFE4F5" strokeWidth="26" fill="none" />
-          <line x1="-10" y1="185" x2="390" y2="165" stroke="#FFFFFF" strokeWidth="10" />
-          <line x1="145" y1="-20" x2="105" y2="540" stroke="#FFFFFF" strokeWidth="10" />
-          <polygon
-            points="110,30 265,30 342,160 265,290 110,290 32,160"
-            fill="rgba(15, 118, 110, 0.06)"
-            stroke="#0F766E"
-            strokeOpacity="0.75"
-            strokeWidth="1.5"
-            strokeDasharray="6 5"
-          />
-        </svg>
 
         {loading && tickets.length === 0 ? (
           <div className="absolute inset-4">
@@ -267,78 +273,37 @@ export function WargaPetaPage() {
           </div>
         ) : (
           <>
-            {clusters.map((cluster) => (
-              <div
-                key={cluster.id}
-                title={cluster.label}
-                style={{
-                  left: `${cluster.mapX}%`,
-                  top: `${cluster.mapY}%`,
-                  width: `${cluster.sizePx}px`,
-                  height: `${cluster.sizePx}px`,
-                }}
-                className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand text-brand-fg border-[2.5px] border-surface flex items-center justify-center font-mono font-bold text-xs shadow-md"
-              >
-                {cluster.count}
-              </div>
-            ))}
-
-            {visiblePins.map((pin) => {
-              const isSelected = selectedPin?.id === pin.id;
-              const status = TICKET_STATUSES[pin.status] || TICKET_STATUSES.OPEN;
-              const PinIcon = status.Icon;
-              return (
-                <button
-                  key={pin.id}
-                  type="button"
-                  onClick={() => setSelectedId(pin.id)}
-                  aria-label={`${pin.title} (${pin.displayCode})`}
-                  aria-pressed={isSelected}
-                  style={{
-                    left: `${pin.mapX}%`,
-                    top: `${pin.mapY}%`,
-                  }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer focus-visible:outline-none"
-                >
-                  {isSelected && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 size-[52px] rounded-full bg-brand/20 border-2 border-brand/70"
-                    />
-                  )}
-                  <span
-                    style={{ backgroundColor: status.pinHex }}
-                    className={[
-                      "relative rounded-full flex items-center justify-center text-white shadow-md transition-transform duration-150",
-                      isSelected
-                        ? "size-[38px] border-[3px] border-brand scale-110"
-                        : "size-[30px] border-2 border-surface hover:scale-110",
-                    ].join(" ")}
-                  >
-                    <PinIcon className={isSelected ? "size-[18px]" : "size-3.5"} aria-hidden="true" />
-                  </span>
-                </button>
-              );
-            })}
+            <CivicLeafletMap
+              pins={mapPins}
+              selectedPinId={selectedPin?.id ?? null}
+              onSelectPin={setSelectedId}
+              userCoords={userCoords}
+              focusTarget={focusTarget}
+              className="absolute inset-0 h-full w-full"
+              ariaLabel="Peta penuh laporan fasilitas Surabaya dan Sidoarjo"
+            />
 
             <Button
               variant="secondary"
               density="icon"
-              aria-label="Lokasi Saya"
+              aria-label="Fokus ke lokasi saya"
               loading={gpsLoading}
               onClick={focusGps}
-              className="absolute right-4 bottom-40 md:bottom-6 !size-12 shadow-elevated text-brand z-10"
+              className="absolute right-3 bottom-44 md:bottom-6 !size-11 shadow-popover text-brand z-[400]"
             >
               <LocateFixed className="size-5" aria-hidden="true" />
             </Button>
 
             {selectedPin && (
-              <div className="absolute inset-x-3.5 bottom-5 md:left-6 md:right-auto md:w-[380px] z-10">
+              <div
+                key={selectedPin.id}
+                className="absolute inset-x-3.5 bottom-5 md:left-6 md:right-auto md:w-[390px] z-[400] animate-lapor-sheet"
+              >
                 <Card
                   density="none"
                   interactive
                   onClick={() => navigate(`/tiket/${selectedPin.id}`)}
-                  className="px-3.5 py-3 !border-[1.5px] !border-brand !shadow-elevated flex flex-col gap-2"
+                  className="px-4 py-3.5 !border-[1.5px] !border-brand !shadow-elevated flex flex-col gap-2"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <Badge status={selectedPin.status} />
@@ -360,12 +325,12 @@ export function WargaPetaPage() {
                     {selectedPin.location} · {selectedPin.departmentLabel}
                   </p>
 
-                  <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center justify-between gap-2 text-xs pt-1 border-t border-line/70">
                     <span className="font-sans text-fg-muted">
                       {selectedPin.categoryLabel}
                     </span>
                     <span className="font-head font-semibold text-brand shrink-0">
-                      {selectedPin.supportCount} Dukungan · Lihat Detail →
+                      {selectedPin.supportCount} Dukungan · Buka Detail
                     </span>
                   </div>
                 </Card>
@@ -373,8 +338,8 @@ export function WargaPetaPage() {
             )}
 
             {!loading && visiblePins.length === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center p-6">
-                <Card className="max-w-sm text-center flex flex-col items-center gap-2">
+              <div className="absolute inset-0 z-[400] flex items-center justify-center p-6 pointer-events-none">
+                <Card className="max-w-sm text-center flex flex-col items-center gap-2 pointer-events-auto shadow-elevated">
                   <h2 className="font-head font-semibold text-base text-fg">
                     Tidak ada pin pada filter ini
                   </h2>

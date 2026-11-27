@@ -74,14 +74,14 @@ export function ProfileDrawer() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 animate-lapor-fade"
       role="dialog"
       aria-modal="true"
       aria-label="Profil akun LaporPAK!"
       onClick={() => setOpen(false)}
     >
       <aside
-        className="w-full max-w-sm h-full bg-surface text-fg border-l border-line shadow-elevated flex flex-col justify-between overflow-y-auto"
+        className="w-full max-w-sm h-full bg-surface text-fg border-l border-line shadow-elevated animate-lapor-drawer flex flex-col justify-between overflow-y-auto"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="p-5 flex flex-col gap-5">

@@ -12,6 +12,8 @@ import { useAuth } from "../../context/AuthContext.tsx";
 import { TopNavbar, DinasSidebar } from "../../components/layout/index.ts";
 import type { DinasQueueFilterKey } from "../../components/layout/index.ts";
 import { Badge, Button, Card, Skeleton, useToast } from "../../components/ui/index.js";
+import { CivicLeafletMap } from "../../components/map/CivicLeafletMap.tsx";
+import { useLiveSync } from "../../hooks/useLiveSync.ts";
 import { getRapor, listDinasTickets, onJuryEvent } from "../../services/api.js";
 import {
   computeDinasQueueCounts,
@@ -59,36 +61,45 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
     computeDinasQueueCounts([])
   );
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const filters = selectedCategory === "ALL" ? {} : { category: selectedCategory };
-      const shouldLoadQueue = showSidebar && user?.role === "ADMIN_DINAS";
-      const [raporPayload, tickets] = await Promise.all([
-        getRapor(filters),
-        shouldLoadQueue
-          ? listDinasTickets({}, accessToken).catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      setApiRapor(raporPayload);
-      if (Array.isArray(tickets)) {
-        setQueueCounts(computeDinasQueueCounts(tickets));
+  const loadData = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const filters = selectedCategory === "ALL" ? {} : { category: selectedCategory };
+        const shouldLoadQueue = showSidebar && user?.role === "ADMIN_DINAS";
+        const [raporPayload, tickets] = await Promise.all([
+          getRapor(filters),
+          shouldLoadQueue
+            ? listDinasTickets({}, accessToken).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        setApiRapor(raporPayload);
+        if (Array.isArray(tickets)) {
+          setQueueCounts(computeDinasQueueCounts(tickets));
+        }
+      } catch (err) {
+        if (!silent) setError(err);
+        showToast({ type: "error", error: err });
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError(err);
-      showToast({ type: "error", error: err });
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedCategory, showSidebar, user?.role, accessToken, showToast]);
+    },
+    [selectedCategory, showSidebar, user?.role, accessToken, showToast]
+  );
+
+  const { markSynced } = useLiveSync({
+    onRefresh: () => loadData({ silent: true }),
+    intervalMs: 30_000,
+    realtimeTable: "DepartmentRating",
+  });
 
   useEffect(() => {
-    loadData();
+    loadData().then(markSynced).catch(() => {});
   }, [loadData]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadData()),
+    () => onJuryEvent("reset", () => loadData({ silent: true }).then(markSynced)),
     [loadData]
   );
 
@@ -250,7 +261,7 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
               <p className="font-sans text-sm text-fg-muted max-w-md">
                 Periksa koneksi internet lalu muat ulang data rapor.
               </p>
-              <Button variant="secondary" size="sm" onClick={loadData}>
+              <Button variant="secondary" size="sm" onClick={() => void loadData()}>
                 Coba Lagi
               </Button>
             </Card>
@@ -591,52 +602,23 @@ export function DinasCatatanPage({ showSidebar = true }: DinasCatatanPageProps) 
                 className="flex flex-col gap-3"
               >
                 <h2 className="font-head font-semibold text-xl md:text-2xl leading-[30px] text-fg">
-                  Peta Klaster Rawan Sidoarjo–Surabaya &amp; Kondisi Filter Kosong
+                  Peta Klaster Rawan Sidoarjo dan Surabaya
                 </h2>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                  <div className="lg:col-span-8 relative h-[320px] sm:h-[360px] rounded-2xl border border-line bg-[#EDF2EA] overflow-hidden">
-                    <svg
-                      viewBox="0 0 960 360"
-                      preserveAspectRatio="none"
-                      className="absolute inset-0 size-full pointer-events-none"
-                      aria-hidden="true"
-                    >
-                      <path d="M490 -30 L560 390" stroke="#CFE4F5" strokeWidth="36" fill="none" />
-                      <line x1="-10" y1="200" x2="970" y2="175" stroke="#FFFFFF" strokeWidth="10" />
-                    </svg>
+                  <div className="lg:col-span-8 relative h-[320px] sm:h-[360px] rounded-2xl border border-line overflow-hidden shadow-card">
+                    <CivicLeafletMap
+                      clusters={clusters.map((c) => ({
+                        id: c.id,
+                        label: c.label,
+                        count: c.count,
+                        lat: c.lat,
+                        lng: c.lng,
+                      }))}
+                      ariaLabel="Peta klaster titik rawan kerusakan Sidoarjo dan Surabaya"
+                    />
 
-                    {clusters.map((cluster) => (
-                      <div
-                        key={cluster.id}
-                        title={`${cluster.label}: ${cluster.count} titik laporan`}
-                        style={{
-                          left: `${cluster.mapX}%`,
-                          top: `${cluster.mapY}%`,
-                        }}
-                        className="absolute -translate-x-1/2 -translate-y-1/2"
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-600/20"
-                          style={{
-                            width: `${cluster.sizePx * 2.2}px`,
-                            height: `${cluster.sizePx * 2.2}px`,
-                          }}
-                        />
-                        <div
-                          style={{
-                            width: `${cluster.sizePx}px`,
-                            height: `${cluster.sizePx}px`,
-                          }}
-                          className="relative rounded-full bg-brand text-brand-fg border-[3px] border-surface shadow-elevated flex items-center justify-center font-mono font-bold text-sm"
-                        >
-                          {cluster.count}
-                        </div>
-                      </div>
-                    ))}
-
-                    <div className="absolute bottom-4 left-4 inline-flex items-center gap-2.5 rounded-xl bg-surface/95 border border-line px-3 py-2 shadow-card">
+                    <div className="absolute bottom-4 left-4 z-[400] inline-flex items-center gap-2.5 rounded-xl bg-surface/95 border border-line px-3 py-2 shadow-card">
                       <span className="font-mono font-medium text-[10px] text-fg-muted">
                         Rendah
                       </span>

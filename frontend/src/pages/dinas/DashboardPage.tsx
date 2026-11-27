@@ -11,6 +11,7 @@ import {
   TicketTable,
 } from "../../components/dinas/index.ts";
 import { Button, Input, Skeleton, useToast } from "../../components/ui/index.js";
+import { useLiveSync } from "../../hooks/useLiveSync.ts";
 import {
   executeDinasAction,
   getRapor,
@@ -60,7 +61,6 @@ export function DinasDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<DinasQueueFilterKey>(
     initialStatus && VALID_STATUS_FILTERS.includes(initialStatus)
@@ -73,11 +73,6 @@ export function DinasDashboardPage() {
     ticket: DinasTicketViewRow;
     action: TicketActionItem;
   } | null>(null);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNowMs(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const loadData = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -98,7 +93,6 @@ export function DinasDashboardPage() {
           : ticketPayload?.tickets || [];
         setRawTickets(list);
         if (raporPayload) setRapor(mapRaporResponse(raporPayload));
-        setNowMs(Date.now());
       } catch (err) {
         if (!silent) setError(err);
         showToast({ type: "error", error: err });
@@ -110,13 +104,20 @@ export function DinasDashboardPage() {
     [user, accessToken, showToast]
   );
 
+  const { nowMs, syncLabel, markSynced } = useLiveSync({
+    onRefresh: () => loadData({ silent: true }),
+    intervalMs: 25_000,
+    enabled: Boolean(user),
+    realtimeTable: "Ticket",
+  });
+
   useEffect(() => {
     if (!user) return;
-    loadData();
+    loadData().then(markSynced).catch(() => {});
   }, [user, loadData]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadData({ silent: true })),
+    () => onJuryEvent("reset", () => loadData({ silent: true }).then(markSynced)),
     [loadData]
   );
 
@@ -387,7 +388,8 @@ export function DinasDashboardPage() {
               </h1>
               <p className="font-sans text-sm leading-5 text-fg-muted">
                 {rows.length} tiket · {counts.OVERDUE} melewati tenggat ·{" "}
-                {counts.DISPUTED} dibantah · {counts.ESCALATED} eskalasi
+                {counts.DISPUTED} dibantah · {counts.ESCALATED} eskalasi ·{" "}
+                <span className="font-mono text-xs text-brand">Sinkron {syncLabel}</span>
               </p>
             </div>
 

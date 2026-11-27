@@ -81,7 +81,7 @@ export function Modal({
     >
       {/* Overlay */}
       <div
-        className="fixed inset-0 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+        className="fixed inset-0 bg-slate-950/50 animate-lapor-fade"
         aria-hidden="true"
         onClick={() => {
           if (!blocking) onClose?.();
@@ -99,8 +99,7 @@ export function Modal({
         className={[
           "relative z-10 w-full max-w-md bg-surface text-fg border border-line",
           "rounded-t-3xl sm:rounded-2xl p-6 shadow-xl [[data-theme=slate]_&]:shadow-none",
-          "max-h-[90vh] overflow-y-auto",
-          "transition-transform duration-200 ease-out motion-reduce:transition-none",
+          "max-h-[90vh] overflow-y-auto animate-lapor-sheet",
           "focus:outline-none",
           className,
         ].join(" ")}

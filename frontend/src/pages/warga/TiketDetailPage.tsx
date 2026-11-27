@@ -34,6 +34,7 @@ import {
   verifyTicketAudit,
 } from "../../services/api.js";
 import { humanizeError } from "../../utils/humanize.js";
+import { useLiveSync } from "../../hooks/useLiveSync.ts";
 import LiveCameraCapture from "../../components/camera/LiveCameraCapture.jsx";
 
 interface TicketDetailView {
@@ -191,30 +192,40 @@ export function WargaTiketPage() {
     setRatingComment("");
   }, [id]);
 
-  const loadDetail = useCallback(async () => {
-    if (!id) return;
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const query = coords
-        ? { lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy }
-        : {};
-      const payload = await getTicketDetail(id, query, accessToken);
-      if (requestId === requestIdRef.current) setDetail(payload);
-    } catch (err) {
-      if (requestId === requestIdRef.current) setError(err);
-    } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
-    }
-  }, [id, accessToken, user?.aliasName, coords]);
+  const loadDetail = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!id) return;
+      const requestId = ++requestIdRef.current;
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const query = coords
+          ? { lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy }
+          : {};
+        const payload = await getTicketDetail(id, query, accessToken);
+        if (requestId === requestIdRef.current) setDetail(payload);
+      } catch (err) {
+        if (!silent && requestId === requestIdRef.current) setError(err);
+      } finally {
+        if (requestId === requestIdRef.current) setLoading(false);
+      }
+    },
+    [id, accessToken, user?.aliasName, coords]
+  );
+
+  const { nowMs, syncLabel, markSynced } = useLiveSync({
+    onRefresh: () => loadDetail({ silent: true }),
+    intervalMs: 25_000,
+    enabled: Boolean(id),
+    realtimeTable: "Ticket",
+  });
 
   useEffect(() => {
-    loadDetail();
+    loadDetail().then(markSynced).catch(() => {});
   }, [loadDetail]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadDetail()),
+    () => onJuryEvent("reset", () => loadDetail({ silent: true }).then(markSynced)),
     [loadDetail]
   );
 
@@ -312,7 +323,7 @@ export function WargaTiketPage() {
   const coolingHold =
     Boolean(quorum?.isCoolingHold) &&
     Boolean(quorum?.coolingEndsAt) &&
-    new Date(quorum.coolingEndsAt).getTime() > Date.now();
+    new Date(quorum.coolingEndsAt).getTime() > nowMs;
 
   const requireLogin = () => {
     if (user) return true;
@@ -582,7 +593,9 @@ export function WargaTiketPage() {
             <ArrowLeft className="size-4" aria-hidden="true" />
             Kembali ke Peta
           </Link>
-          <span className="font-mono text-[11px] text-fg-muted">{detail.code}</span>
+          <span className="font-mono text-[11px] text-fg-muted">
+            {detail.code} · Sinkron {syncLabel}
+          </span>
         </div>
 
         <Card density="none" className="p-4 md:p-5 flex flex-col gap-3">

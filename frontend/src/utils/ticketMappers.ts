@@ -186,6 +186,8 @@ export interface RaporClusterView {
   label: string;
   region: "Surabaya" | "Sidoarjo";
   count: number;
+  lat: number;
+  lng: number;
   mapX: number;
   mapY: number;
   sizePx: number;
@@ -675,10 +677,9 @@ function buildClusters(
 
   return [...buckets.entries()]
     .map(([key, bucket]) => {
-      const { mapX, mapY } = projectCoordToMapPercent(
-        bucket.latSum / bucket.count,
-        bucket.lngSum / bucket.count
-      );
+      const avgLat = bucket.latSum / bucket.count;
+      const avgLng = bucket.lngSum / bucket.count;
+      const { mapX, mapY } = projectCoordToMapPercent(avgLat, avgLng);
       const sizePx =
         bucket.count >= 12 ? 52 : bucket.count >= 7 ? 44 : bucket.count >= 4 ? 38 : 36;
       return {
@@ -686,6 +687,8 @@ function buildClusters(
         label: `${bucket.region} · ${bucket.count} titik`,
         region: bucket.region,
         count: bucket.count,
+        lat: avgLat,
+        lng: avgLng,
         mapX,
         mapY,
         sizePx,

@@ -51,9 +51,9 @@ import {
 } from "../../utils/laporDraft.ts";
 import {
   inferRegionFromCoords,
-  projectCoordToMapPercent,
 } from "../../utils/ticketMappers.ts";
 import { CATEGORIES, SLA_TIERS } from "../../constants/designTokens.js";
+import { CivicLeafletMap } from "../../components/map/CivicLeafletMap.tsx";
 import LiveCameraCapture from "../../components/camera/LiveCameraCapture.jsx";
 
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
@@ -270,7 +270,6 @@ export function WargaLaporPage() {
     : draft.gpsAccuracyMeters !== null
       ? 1
       : 0;
-  const mapPin = projectCoordToMapPercent(draft.lat, draft.lng);
   const region = inferRegionFromCoords(draft.lat, draft.lng);
   const canAttemptCamera = Boolean(user) || isJuryMode;
 
@@ -496,41 +495,22 @@ export function WargaLaporPage() {
         <h1 className="sr-only">Buat Laporan Kerusakan</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
           <Card density="none" className="p-3.5 md:p-4 flex flex-col gap-3">
-            <div className="relative h-[180px] md:h-[220px] w-full rounded-xl border border-line bg-[#E2ECE9] overflow-hidden">
-              <svg
-                viewBox="0 0 320 180"
-                preserveAspectRatio="none"
-                className="absolute inset-0 size-full pointer-events-none"
-                aria-hidden="true"
-              >
-                <line x1="-10" y1="98" x2="330" y2="82" stroke="#FFFFFF" strokeWidth="10" />
-                <line x1="165" y1="-10" x2="152" y2="190" stroke="#FFFFFF" strokeWidth="8" />
-                <polygon
-                  points="95,18 225,18 288,90 225,162 95,162 28,90"
-                  fill="rgba(15, 118, 110, 0.08)"
-                  stroke="#0F766E"
-                  strokeWidth="1.5"
-                  strokeDasharray="6 4"
-                />
-                <circle
-                  cx="162"
-                  cy="88"
-                  r="32"
-                  fill="rgba(15, 118, 110, 0.16)"
-                  stroke="rgba(15, 118, 110, 0.6)"
-                  strokeWidth="1.5"
-                />
-              </svg>
+            <div className="relative h-[200px] md:h-[250px] w-full rounded-xl border border-line overflow-hidden">
+              <CivicLeafletMap
+                defaultCenter={[draft.lat, draft.lng]}
+                defaultZoom={16}
+                userCoords={{ lat: draft.lat, lng: draft.lng }}
+                userRadiusMeters={50}
+                focusTarget={{
+                  lat: draft.lat,
+                  lng: draft.lng,
+                  zoom: 16,
+                  seq: Math.round((draft.lat + draft.lng) * 100000),
+                }}
+                ariaLabel="Peta titik lokasi laporan dengan radius 50 meter"
+              />
 
-              <span
-                style={{ left: `${mapPin.mapX}%`, top: `${mapPin.mapY}%` }}
-                className="absolute -translate-x-1/2 -translate-y-1/2 size-[30px] rounded-full bg-brand border-[2.5px] border-surface text-brand-fg flex items-center justify-center shadow-md"
-                aria-hidden="true"
-              >
-                <MapPin className="size-[15px]" />
-              </span>
-
-              <div className="absolute top-2.5 left-2.5">
+              <div className="absolute top-2.5 left-2.5 z-[400]">
                 <Badge
                   variant={gpsInaccurate ? "error" : draft.gpsAccuracyMeters === null ? "warning" : "success"}
                   size="sm"

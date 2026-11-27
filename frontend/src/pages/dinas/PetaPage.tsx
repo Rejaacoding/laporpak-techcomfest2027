@@ -5,8 +5,6 @@ import {
   Clock,
   LocateFixed,
   MapPin,
-  Minus,
-  Plus,
   Search,
   Send,
   ThumbsUp,
@@ -27,6 +25,13 @@ import {
   useToast,
 } from "../../components/ui/index.js";
 import {
+  CivicLeafletMap,
+  DEFAULT_MAP_CENTER,
+  DEFAULT_MAP_ZOOM,
+  type MapFocusTarget,
+} from "../../components/map/CivicLeafletMap.tsx";
+import { useLiveSync } from "../../hooks/useLiveSync.ts";
+import {
   getRapor,
   getTicketDetail,
   getTicketMediaSignedUrl,
@@ -37,19 +42,14 @@ import {
   computeDinasQueueCounts,
   mapDinasTicketsToRows,
   mapRaporResponse,
-  projectCoordToMapPercent,
 } from "../../utils/ticketMappers.ts";
 import type {
+  ApiDinasTicket,
   DinasTicketViewRow,
   RaporViewModel,
   TicketActionItem,
 } from "../../utils/ticketMappers.ts";
 import { CATEGORIES, TICKET_STATUSES } from "../../constants/designTokens.js";
-
-interface DinasMapPin extends DinasTicketViewRow {
-  mapX: number;
-  mapY: number;
-}
 
 interface TicketDetailView {
   id: string;
@@ -76,13 +76,13 @@ const SLA_CHIP_STYLES: Record<DinasTicketViewRow["slaTone"], string> = {
 const LEGEND_STATUSES = ["OVERDUE", "ESCALATED", "DISPUTED", "IN_PROGRESS", "OPEN"];
 
 /**
- * Peta Laporan Dinas (/dinas/peta) — live projected pins, inspector and actions.
+ * Peta Laporan Dinas (/dinas/peta) - real interactive Leaflet map, live sync, inspector and actions.
  */
 export function DinasPetaPage() {
   const { user, accessToken, isJuryMode } = useAuth();
   const { showToast } = useToast();
 
-  const [rows, setRows] = useState<DinasTicketViewRow[]>([]);
+  const [rawTickets, setRawTickets] = useState<ApiDinasTicket[]>([]);
   const [rapor, setRapor] = useState<RaporViewModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -90,7 +90,7 @@ export function DinasPetaPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
-  const [zoomScale, setZoomScale] = useState(1);
+  const [focusTarget, setFocusTarget] = useState<MapFocusTarget | null>(null);
   const [detail, setDetail] = useState<TicketDetailView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -101,48 +101,55 @@ export function DinasPetaPage() {
     action: TicketActionItem;
   } | null>(null);
 
-  const loadData = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [ticketPayload, raporPayload] = await Promise.all([
-        listDinasTickets({}, accessToken),
-        getRapor(),
-      ]);
-      const mapped = mapDinasTicketsToRows(ticketPayload);
-      setRows(mapped);
-      setRapor(mapRaporResponse(raporPayload));
-      setSelectedPinId((current) => current || mapped[0]?.id || null);
-    } catch (err) {
-      setError(err);
-      showToast({ type: "error", error: err });
-    } finally {
-      setLoading(false);
-    }
-  }, [user, accessToken, showToast]);
+  const loadData = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!user) return;
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const [ticketPayload, raporPayload] = await Promise.all([
+          listDinasTickets({}, accessToken),
+          getRapor().catch(() => null),
+        ]);
+        const list = Array.isArray(ticketPayload)
+          ? ticketPayload
+          : ticketPayload?.tickets || [];
+        setRawTickets(list);
+        if (raporPayload) setRapor(mapRaporResponse(raporPayload));
+        setSelectedPinId((current) => current || list[0]?.id || null);
+      } catch (err) {
+        if (!silent) setError(err);
+        showToast({ type: "error", error: err });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user, accessToken, showToast]
+  );
+
+  const { nowMs, syncLabel, markSynced } = useLiveSync({
+    onRefresh: () => loadData({ silent: true }),
+    intervalMs: 25_000,
+    enabled: Boolean(user),
+    realtimeTable: "Ticket",
+  });
 
   useEffect(() => {
     if (!user) return;
-    loadData();
+    loadData().then(markSynced).catch(() => {});
   }, [user, loadData]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadData()),
+    () => onJuryEvent("reset", () => loadData({ silent: true }).then(markSynced)),
     [loadData]
   );
 
-  const pins: DinasMapPin[] = useMemo(
-    () =>
-      rows.map((row) => {
-        const { mapX, mapY } = projectCoordToMapPercent(
-          row.publicLat ?? Number.NaN,
-          row.publicLng ?? Number.NaN
-        );
-        return { ...row, mapX, mapY };
-      }),
-    [rows]
+  const rows = useMemo(
+    () => mapDinasTicketsToRows(rawTickets, nowMs),
+    [rawTickets, nowMs]
   );
+
+  const pins = rows;
 
   const categoryOptions = useMemo(() => {
     const countsByCategory = new Map<string, number>();
@@ -298,7 +305,7 @@ export function DinasPetaPage() {
               </h1>
               <p className="font-sans text-sm leading-5 text-fg-muted">
                 {departmentName} · {activeCount} titik aktif · {rows.length} total
-                tiket
+                tiket · <span className="font-mono text-xs text-brand">Sinkron {syncLabel}</span>
               </p>
             </div>
 
@@ -339,11 +346,11 @@ export function DinasPetaPage() {
           <div className="flex flex-col xl:flex-row items-stretch gap-5 flex-1">
             <section
               aria-label="Kanvas peta laporan wilayah Surabaya dan Sidoarjo"
-              className="relative flex-1 min-h-[460px] xl:min-h-[700px] rounded-2xl border border-line bg-[#EDF2EA] overflow-hidden select-none"
+              className="relative flex-1 min-h-[460px] xl:min-h-[700px] rounded-2xl border border-line overflow-hidden shadow-card"
             >
-              {loading ? (
+              {loading && rawTickets.length === 0 ? (
                 <MapSkeleton className="h-full min-h-[460px] rounded-none border-0" />
-              ) : error ? (
+              ) : error && rawTickets.length === 0 ? (
                 <div className="absolute inset-0 flex items-center justify-center p-6">
                   <Card className="max-w-md text-center flex flex-col items-center gap-3">
                     <h2 className="font-head font-semibold text-base text-fg">
@@ -352,168 +359,50 @@ export function DinasPetaPage() {
                     <p className="font-sans text-sm text-fg-muted">
                       Periksa koneksi internet lalu muat ulang antrean.
                     </p>
-                    <Button variant="secondary" size="sm" onClick={loadData}>
+                    <Button variant="secondary" size="sm" onClick={() => void loadData()}>
                       Muat Ulang
                     </Button>
                   </Card>
                 </div>
               ) : (
                 <>
-                  <div
-                    className="absolute inset-0 transition-transform duration-200 ease-out motion-reduce:transition-none origin-center"
-                    style={{ transform: `scale(${zoomScale})` }}
+                  <CivicLeafletMap
+                    pins={visiblePins.map((pin) => ({
+                      id: pin.id,
+                      title: pin.categoryTitle,
+                      code: pin.code,
+                      displayCode: pin.displayCode,
+                      status: pin.status,
+                      lat: pin.publicLat,
+                      lng: pin.publicLng,
+                    }))}
+                    selectedPinId={selectedPin?.id ?? null}
+                    onSelectPin={setSelectedPinId}
+                    focusTarget={focusTarget}
+                    className="absolute inset-0 h-full w-full"
+                    ariaLabel="Peta interaktif laporan wilayah dinas Surabaya dan Sidoarjo"
+                  />
+
+                  <button
+                    type="button"
+                    aria-label="Reset posisi peta ke seluruh wilayah"
+                    title="Reset tampilan wilayah"
+                    onClick={() =>
+                      setFocusTarget({
+                        lat: DEFAULT_MAP_CENTER[0],
+                        lng: DEFAULT_MAP_CENTER[1],
+                        zoom: DEFAULT_MAP_ZOOM,
+                        seq: Date.now(),
+                      })
+                    }
+                    className="absolute top-24 right-2.5 z-[400] size-[34px] rounded-xl bg-surface border border-line shadow-card flex items-center justify-center text-brand hover:bg-brand-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand cursor-pointer"
                   >
-                    <svg
-                      viewBox="0 0 1000 740"
-                      preserveAspectRatio="none"
-                      className="absolute inset-0 size-full pointer-events-none"
-                      aria-hidden="true"
-                    >
-                      <path d="M540 -40 L640 780" stroke="#CFE4F5" strokeWidth="44" fill="none" />
-                      <rect x="230" y="180" width="150" height="90" rx="18" fill="#DCEAD3" />
-                      <rect x="560" y="490" width="170" height="100" rx="20" fill="#DCEAD3" />
-                      <line x1="-20" y1="330" x2="1020" y2="290" stroke="#FFFFFF" strokeWidth="12" />
-                      <line x1="140" y1="465" x2="880" y2="495" stroke="#FFFFFF" strokeWidth="10" />
-                      <line x1="360" y1="-20" x2="310" y2="760" stroke="#FFFFFF" strokeWidth="12" />
-                      <line x1="650" y1="10" x2="620" y2="750" stroke="#FFFFFF" strokeWidth="10" />
-                      <line x1="40" y1="145" x2="900" y2="200" stroke="#FFFFFF" strokeWidth="8" />
-                      <polygon
-                        points="290,75 680,75 860,355 680,635 290,635 110,355"
-                        fill="rgba(15, 118, 110, 0.08)"
-                        stroke="#0F766E"
-                        strokeOpacity="0.85"
-                        strokeWidth="2"
-                        strokeDasharray="8 6"
-                      />
-                    </svg>
+                    <LocateFixed className="size-4" aria-hidden="true" />
+                  </button>
 
-                    <span className="absolute left-[32%] top-[13%] font-mono font-bold text-[10px] text-slate-500/80 pointer-events-none">
-                      SURABAYA PUSAT
-                    </span>
-                    <span className="absolute left-[17%] top-[47%] font-mono font-bold text-[10px] text-slate-500/80 pointer-events-none">
-                      SURABAYA SELATAN · GAYUNGAN
-                    </span>
-                    <span className="absolute left-[71%] top-[36%] font-mono font-bold text-[10px] text-slate-500/80 pointer-events-none">
-                      RUNGKUT
-                    </span>
-                    <span className="absolute left-[48%] top-[73%] font-mono font-bold text-[10px] text-slate-500/80 pointer-events-none">
-                      WARU · SIDOARJO
-                    </span>
-
-                    <div className="absolute left-[16%] top-[12%] inline-flex items-center rounded-full bg-surface/95 border border-brand px-2.5 py-1 shadow-sm pointer-events-none">
-                      <span className="font-mono font-bold text-[10px] leading-[14px] text-brand">
-                        Poligon Layanan Surabaya &amp; Sidoarjo
-                      </span>
-                    </div>
-
-                    {clusters.map((cluster) => (
-                      <button
-                        key={cluster.id}
-                        type="button"
-                        onClick={() =>
-                          setZoomScale((zoom) =>
-                            Math.min(1.4, Number((zoom + 0.15).toFixed(2)))
-                          )
-                        }
-                        title={cluster.label}
-                        aria-label={`Klaster ${cluster.label}`}
-                        style={{
-                          left: `${cluster.mapX}%`,
-                          top: `${cluster.mapY}%`,
-                          width: `${cluster.sizePx}px`,
-                          height: `${cluster.sizePx}px`,
-                        }}
-                        className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand text-brand-fg border-[3px] border-surface shadow-elevated flex items-center justify-center font-mono font-bold text-sm hover:scale-105 transition duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-                      >
-                        {cluster.count}
-                      </button>
-                    ))}
-
-                    {visiblePins.map((pin) => {
-                      const isSelected = selectedPin?.id === pin.id;
-                      const status = TICKET_STATUSES[pin.status] || TICKET_STATUSES.OPEN;
-                      const PinIcon = status.Icon;
-                      return (
-                        <button
-                          key={pin.id}
-                          type="button"
-                          onClick={() => setSelectedPinId(pin.id)}
-                          aria-label={`${pin.displayCode} ${pin.categoryTitle}`}
-                          aria-pressed={isSelected}
-                          style={{
-                            left: `${pin.mapX}%`,
-                            top: `${pin.mapY}%`,
-                          }}
-                          className="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer focus-visible:outline-none"
-                        >
-                          {(pin.status === "OVERDUE" || isSelected) && (
-                            <span
-                              aria-hidden="true"
-                              className={[
-                                "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full",
-                                isSelected
-                                  ? "size-[60px] bg-brand/20 border-2 border-brand/60"
-                                  : "size-12 bg-red-600/20 border border-red-600/50 animate-pulse motion-reduce:animate-none",
-                              ].join(" ")}
-                            />
-                          )}
-                          <span
-                            style={{ backgroundColor: status.pinHex }}
-                            className={[
-                              "relative rounded-full flex items-center justify-center text-white shadow-md transition-transform duration-150",
-                              isSelected
-                                ? "size-[38px] border-[3px] border-brand scale-110"
-                                : "size-8 border-2 border-surface group-hover:scale-110",
-                            ].join(" ")}
-                          >
-                            <PinIcon
-                              className={isSelected ? "size-[18px]" : "size-[15px]"}
-                              aria-hidden="true"
-                            />
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="absolute top-4 right-4 z-10 flex flex-col gap-0.5 rounded-xl bg-surface border border-line p-1 shadow-card">
-                    <button
-                      type="button"
-                      aria-label="Perbesar peta"
-                      onClick={() =>
-                        setZoomScale((zoom) =>
-                          Math.min(1.4, Number((zoom + 0.15).toFixed(2)))
-                        )
-                      }
-                      className="size-[34px] rounded-lg flex items-center justify-center text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand cursor-pointer"
-                    >
-                      <Plus className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Perkecil peta"
-                      onClick={() =>
-                        setZoomScale((zoom) =>
-                          Math.max(0.85, Number((zoom - 0.15).toFixed(2)))
-                        )
-                      }
-                      className="size-[34px] rounded-lg flex items-center justify-center text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand cursor-pointer"
-                    >
-                      <Minus className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Reset posisi peta"
-                      onClick={() => setZoomScale(1)}
-                      className="size-[34px] rounded-lg flex items-center justify-center text-brand hover:bg-brand-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand cursor-pointer"
-                    >
-                      <LocateFixed className="size-4" aria-hidden="true" />
-                    </button>
-                  </div>
-
-                  <div className="absolute bottom-4 left-4 z-10 max-w-[350px] rounded-[14px] bg-surface/95 border border-line px-3.5 py-3 shadow-popover">
+                  <div className="absolute bottom-4 left-4 z-[400] max-w-[330px] rounded-[14px] bg-surface/95 border border-line px-3.5 py-3 shadow-popover">
                     <p className="font-mono font-bold text-[10px] leading-[14px] text-fg-muted mb-2">
-                      LEGENDA PETA &amp; STATUS
+                      LEGENDA STATUS
                     </p>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
                       {LEGEND_STATUSES.map((statusCode) => {
@@ -534,21 +423,12 @@ export function DinasPetaPage() {
                           </div>
                         );
                       })}
-                      <div className="inline-flex items-center gap-1.5 min-w-0">
-                        <span
-                          className="size-2.5 rounded-full shrink-0 bg-brand"
-                          aria-hidden="true"
-                        />
-                        <span className="font-sans text-xs leading-4 text-fg truncate">
-                          Klaster Area
-                        </span>
-                      </div>
                     </div>
                   </div>
 
                   {!loading && visiblePins.length === 0 && (
-                    <div className="absolute inset-0 flex items-center justify-center p-6">
-                      <Card className="max-w-sm text-center flex flex-col items-center gap-2">
+                    <div className="absolute inset-0 z-[400] flex items-center justify-center p-6 pointer-events-none">
+                      <Card className="max-w-sm text-center flex flex-col items-center gap-2 pointer-events-auto shadow-elevated">
                         <h2 className="font-head font-semibold text-base text-fg">
                           Tidak ada pin pada filter ini
                         </h2>
@@ -759,7 +639,7 @@ export function DinasPetaPage() {
         isJuryMode={isJuryMode}
         onClose={() => setSelectedAction(null)}
         onSuccess={() => {
-          loadData();
+          void loadData({ silent: true });
           setDetailRefresh((value) => value + 1);
         }}
       />

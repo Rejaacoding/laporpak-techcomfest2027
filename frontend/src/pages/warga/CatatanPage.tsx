@@ -14,6 +14,8 @@ import {
   TopNavbar,
 } from "../../components/layout/index.ts";
 import { Badge, Button, Card, Skeleton, useToast } from "../../components/ui/index.js";
+import { CivicLeafletMap } from "../../components/map/CivicLeafletMap.tsx";
+import { useLiveSync } from "../../hooks/useLiveSync.ts";
 import { getRapor, onJuryEvent } from "../../services/api.js";
 import {
   mapRaporResponse,
@@ -108,26 +110,35 @@ export function WargaCatatanPage() {
   const [showFormula, setShowFormula] = useState(false);
   const [activeClusterId, setActiveClusterId] = useState<string>("");
 
-  const loadRapor = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const payload = await getRapor();
-      setData(mapRaporResponse(payload));
-    } catch (err) {
-      setError(err);
-      showToast({ type: "error", error: err });
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const loadRapor = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const payload = await getRapor();
+        setData(mapRaporResponse(payload));
+      } catch (err) {
+        if (!silent) setError(err);
+        showToast({ type: "error", error: err });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [showToast]
+  );
+
+  const { syncLabel, markSynced } = useLiveSync({
+    onRefresh: () => loadRapor({ silent: true }),
+    intervalMs: 30_000,
+    realtimeTable: "DepartmentRating",
+  });
 
   useEffect(() => {
-    loadRapor();
+    loadRapor().then(markSynced).catch(() => {});
   }, [loadRapor]);
 
   useEffect(
-    () => onJuryEvent("reset", () => loadRapor()),
+    () => onJuryEvent("reset", () => loadRapor({ silent: true }).then(markSynced)),
     [loadRapor]
   );
 
@@ -157,14 +168,20 @@ export function WargaCatatanPage() {
       </div>
 
       <main className="max-w-[1440px] w-full mx-auto flex-1 px-4 sm:px-6 lg:px-9 pt-[18px] pb-24 md:py-7 flex flex-col gap-5 md:gap-6">
-        <header className="flex flex-col gap-1">
-          <h1 className="font-head font-bold text-[22px] leading-7 md:text-[30px] md:leading-9 text-fg">
-            Catatan
-          </h1>
-          <p className="font-sans text-[13px] leading-[18px] md:text-sm md:leading-5 text-fg-muted">
-            Transparansi penyelesaian laporan, rasio lempar/tolak &amp; nilai
-            kerja layanan Surabaya–Sidoarjo.
-          </p>
+        <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+          <div className="flex flex-col gap-1">
+            <h1 className="font-head font-bold text-[22px] leading-7 md:text-[30px] md:leading-9 text-fg">
+              Catatan Kerja Dinas
+            </h1>
+            <p className="font-sans text-[13px] leading-[18px] md:text-sm md:leading-5 text-fg-muted">
+              Transparansi penyelesaian laporan, rasio lempar/tolak, rating warga, dan nilai
+              kerja layanan Surabaya dan Sidoarjo.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-fg-muted shrink-0">
+            <span className="size-2 rounded-full bg-green-600" aria-hidden="true" />
+            Sinkron {syncLabel}
+          </span>
         </header>
 
         {loading && !data ? (
@@ -184,7 +201,7 @@ export function WargaCatatanPage() {
             <p className="font-sans text-sm text-fg-muted max-w-md">
               Periksa koneksi internet lalu muat ulang data rapor publik.
             </p>
-            <Button variant="secondary" size="sm" onClick={loadRapor}>
+            <Button variant="secondary" size="sm" onClick={() => void loadRapor()}>
               Coba Lagi
             </Button>
           </Card>
@@ -375,66 +392,29 @@ export function WargaCatatanPage() {
                   </span>
                 </div>
 
-                <div className="relative h-[220px] md:h-[260px] rounded-2xl bg-[#EDF2EA] border border-line overflow-hidden">
-                  <div
-                    className="absolute left-[50%] -top-5 w-5 h-[120%] bg-[#CFE4F5]"
-                    aria-hidden="true"
+                <div className="relative h-[250px] md:h-[300px] rounded-2xl border border-line overflow-hidden shadow-card">
+                  <CivicLeafletMap
+                    clusters={clusters.map((c) => ({
+                      id: c.id,
+                      label: c.label,
+                      count: c.count,
+                      lat: c.lat,
+                      lng: c.lng,
+                    }))}
+                    selectedClusterId={activeCluster?.id ?? null}
+                    onSelectCluster={setActiveClusterId}
+                    ariaLabel="Peta klaster titik rawan Surabaya dan Sidoarjo"
                   />
-                  <div
-                    className="absolute -left-2.5 top-[50%] w-[108%] h-2 bg-white/90"
-                    aria-hidden="true"
-                  />
-
-                  {clusters.length > 0 && (
-                    <>
-                      <div
-                        className="absolute left-[34%] top-[32%] size-24 rounded-full bg-red-600/25 pointer-events-none"
-                        aria-hidden="true"
-                      />
-                      <div
-                        className="absolute left-[63%] top-[23%] size-20 rounded-full bg-yellow-400/30 pointer-events-none"
-                        aria-hidden="true"
-                      />
-                      <div
-                        className="absolute left-[13%] top-[39%] size-[75px] rounded-full bg-teal-500/25 pointer-events-none"
-                        aria-hidden="true"
-                      />
-                    </>
-                  )}
-
-                  {clusters.map((cluster) => {
-                    const isSelected = cluster.id === activeCluster?.id;
-                    return (
-                      <button
-                        key={cluster.id}
-                        type="button"
-                        onClick={() => setActiveClusterId(cluster.id)}
-                        aria-label={`${cluster.label} (${cluster.count} laporan)`}
-                        style={{
-                          left: `${cluster.mapX}%`,
-                          top: `${cluster.mapY}%`,
-                          width: `${cluster.sizePx}px`,
-                          height: `${cluster.sizePx}px`,
-                        }}
-                        className={[
-                          "absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand text-white border-2 border-white shadow-elevated flex items-center justify-center font-mono font-bold text-xs cursor-pointer transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                          isSelected ? "ring-2 ring-brand/40 scale-105" : "",
-                        ].join(" ")}
-                      >
-                        {cluster.count}
-                      </button>
-                    );
-                  })}
 
                   {clusters.length === 0 && (
-                    <div className="absolute inset-0 flex items-center justify-center p-4">
-                      <p className="rounded-xl bg-surface/95 border border-line px-3 py-2 text-xs font-medium text-fg-muted text-center">
+                    <div className="absolute inset-0 z-[400] flex items-center justify-center p-4 pointer-events-none">
+                      <p className="rounded-xl bg-surface/95 border border-line px-3 py-2 text-xs font-medium text-fg-muted text-center shadow-card">
                         Belum ada titik kerusakan pada filter ini.
                       </p>
                     </div>
                   )}
 
-                  <div className="absolute left-2.5 bottom-2.5 rounded-[10px] bg-white/95 border border-line px-2.5 py-1.5 flex items-center gap-1.5">
+                  <div className="absolute left-2.5 bottom-2.5 z-[400] rounded-[10px] bg-surface/95 border border-line px-2.5 py-1.5 flex items-center gap-1.5 shadow-card">
                     <span className="font-sans font-medium text-[9px] leading-3 text-fg-muted">
                       Rendah
                     </span>
