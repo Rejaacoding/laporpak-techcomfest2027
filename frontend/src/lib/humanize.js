@@ -166,3 +166,24 @@ export function humanizeError(input, fallback = HUMAN_ERRORS.INTERNAL_ERROR) {
 
   return fallback;
 }
+
+/**
+ * Build a sanitized toast payload. Kept pure so the exact title/message that
+ * reaches the UI can be pinned by Node unit tests without JSX.
+ */
+export function buildToastPayload({ type = "info", title, message, error } = {}) {
+  const isError = type === "error" || Boolean(error);
+  const rawMessage = error ?? message;
+  const safeMessage = rawMessage
+    ? isError
+      ? humanizeError(rawMessage)
+      : message
+    : "";
+  const safeTitle = title ? (isError ? humanizeError(title) : title) : undefined;
+
+  return {
+    type,
+    ...(safeTitle ? { title: safeTitle } : {}),
+    message: safeMessage,
+  };
+}
