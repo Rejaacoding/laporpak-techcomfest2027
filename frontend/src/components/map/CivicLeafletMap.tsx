@@ -89,7 +89,7 @@ function prefersReducedMotion(): boolean {
 
 /**
  * Interactive Leaflet street map for Surabaya and Sidoarjo.
- * Uses Carto Voyager tiles (with OSM fallback), real GeoJSON boundary polygon,
+ * Uses Esri World Topo Map tiles (with OpenStreetMap fallback), real boundary polygon,
  * semantic 10-status pins, heat clusters, and user GPS marker.
  */
 export function CivicLeafletMap({
@@ -150,11 +150,10 @@ export function CivicLeafletMap({
     }
 
     const primaryTiles = L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
       {
-        subdomains: "abcd",
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap &copy; CARTO",
+        maxZoom: 18,
+        attribution: "Tiles &copy; Esri",
       }
     );
 
