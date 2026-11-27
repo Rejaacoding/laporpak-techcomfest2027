@@ -1,65 +1,164 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Filter, Search } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
 import { TopNavbar, DinasSidebar } from "../../components/layout/index.ts";
 import type { DinasQueueFilterKey } from "../../components/layout/index.ts";
 import {
   AlertBanners,
+  DinasActionModal,
   StatOverview,
   TicketTable,
 } from "../../components/dinas/index.ts";
-import { Button, Input, Modal, useToast } from "../../components/ui/index.js";
+import { Button, Input, Skeleton, useToast } from "../../components/ui/index.js";
 import {
-  DINAS_DEPARTMENT_META,
-  DINAS_KPI_STATS,
-  DINAS_MOCK_TICKETS,
-  DINAS_QUEUE_COUNTS,
-} from "../../data/mockTickets.ts";
-import type { DinasTicketRow, TicketActionItem } from "../../data/mockTickets.ts";
+  getRapor,
+  listDinasTickets,
+  onJuryEvent,
+} from "../../lib/api.js";
+import {
+  computeDinasQueueCounts,
+  mapDinasTicketsToRows,
+  mapRaporResponse,
+} from "../../lib/ticketMappers.ts";
+import type {
+  DinasActionId,
+  DinasTicketViewRow,
+  KpiStatItem,
+  RaporViewModel,
+  TicketActionItem,
+} from "../../lib/ticketMappers.ts";
+import { TICKET_STATUSES } from "../../constants/designTokens.js";
 
 type RegionFilter = "ALL" | "Surabaya" | "Sidoarjo";
 
 const REGION_CYCLE: RegionFilter[] = ["ALL", "Surabaya", "Sidoarjo"];
 
 /**
- * Dashboard Dinas (/dinas) — sliced from Figma "05 — Dashboard Dinas (/dinas)"
- * Uses TopNavbar, DinasSidebar, StatOverview, AlertBanners, and TicketTable.
+ * Dashboard Dinas (/dinas) — live queue, alerts, KPI and 8 mutation actions.
  */
 export function DinasDashboardPage() {
-  const { user } = useAuth();
+  const { user, accessToken, isJuryMode } = useAuth();
   const { showToast } = useToast();
 
+  const [rows, setRows] = useState<DinasTicketViewRow[]>([]);
+  const [rapor, setRapor] = useState<RaporViewModel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [activeFilter, setActiveFilter] = useState<DinasQueueFilterKey>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [regionFilter, setRegionFilter] = useState<RegionFilter>("ALL");
   const [selectedAction, setSelectedAction] = useState<{
-    ticket: DinasTicketRow;
+    ticket: DinasTicketViewRow;
     action: TicketActionItem;
   } | null>(null);
 
-  const filteredTickets = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+  const loadData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [ticketPayload, raporPayload] = await Promise.all([
+        listDinasTickets({}, accessToken),
+        getRapor(),
+      ]);
+      setRows(mapDinasTicketsToRows(ticketPayload));
+      setRapor(mapRaporResponse(raporPayload));
+    } catch (err) {
+      setError(err);
+      showToast({ type: "error", error: err });
+    } finally {
+      setLoading(false);
+    }
+  }, [user, accessToken, showToast]);
 
-    return DINAS_MOCK_TICKETS.filter((ticket) => {
-      if (activeFilter !== "ALL" && ticket.status !== activeFilter) {
-        return false;
-      }
-      if (regionFilter !== "ALL" && ticket.region !== regionFilter) {
-        return false;
-      }
-      if (!q) return true;
+  useEffect(() => {
+    if (!user) return;
+    loadData();
+  }, [user, loadData]);
+
+  useEffect(
+    () => onJuryEvent("reset", () => loadData()),
+    [loadData]
+  );
+
+  const counts = useMemo(() => computeDinasQueueCounts(rows), [rows]);
+
+  const filteredTickets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return rows.filter((ticket) => {
+      if (activeFilter !== "ALL" && ticket.status !== activeFilter) return false;
+      if (regionFilter !== "ALL" && ticket.region !== regionFilter) return false;
+      if (!query) return true;
       return (
-        ticket.id.toLowerCase().includes(q) ||
-        ticket.categoryTitle.toLowerCase().includes(q) ||
-        ticket.location.toLowerCase().includes(q)
+        ticket.displayCode.toLowerCase().includes(query) ||
+        ticket.code.toLowerCase().includes(query) ||
+        ticket.categoryTitle.toLowerCase().includes(query) ||
+        ticket.location.toLowerCase().includes(query)
       );
     });
-  }, [activeFilter, regionFilter, searchQuery]);
+  }, [rows, activeFilter, regionFilter, searchQuery]);
+
+  const disputedTicket = useMemo(
+    () => rows.find((ticket) => ticket.status === "DISPUTED") || null,
+    [rows]
+  );
+  const escalatedTicket = useMemo(
+    () => rows.find((ticket) => ticket.status === "ESCALATED") || null,
+    [rows]
+  );
+
+  const activeRows = useMemo(
+    () => rows.filter((ticket) => !TICKET_STATUSES[ticket.status]?.terminal),
+    [rows]
+  );
+
+  const kpiStats: KpiStatItem[] = useMemo(() => {
+    const tierCounts = { DARURAT: 0, MENENGAH: 0, STANDAR: 0 };
+    for (const ticket of activeRows) {
+      tierCounts[ticket.tier] += 1;
+    }
+    const overdueCount = rows.filter((ticket) => ticket.status === "OVERDUE").length;
+    const disputedCount = rows.filter((ticket) => ticket.status === "DISPUTED").length;
+    const escalatedCount = rows.filter((ticket) => ticket.status === "ESCALATED").length;
+    const myDepartment = rapor?.departments.find(
+      (department) => department.id === user?.departmentId
+    );
+    const score = myDepartment?.score ?? 80;
+    return [
+      {
+        id: "active",
+        label: "Tiket Aktif",
+        value: String(activeRows.length),
+        meta: `${tierCounts.DARURAT} Darurat · ${tierCounts.MENENGAH} Menengah · ${tierCounts.STANDAR} Standar`,
+        valueTone: "default",
+      },
+      {
+        id: "overdue",
+        label: "Melewati Tenggat",
+        value: String(overdueCount),
+        meta: "Penalti aktif -3 / -6 poin per tiket",
+        valueTone: "error",
+      },
+      {
+        id: "disputed-escalated",
+        label: "Dibantah & Eskalasi",
+        value: `${disputedCount} / ${escalatedCount}`,
+        meta: `${disputedCount} Dibantah Warga · ${escalatedCount} Eskalasi Berita Acara`,
+        valueTone: "purple",
+      },
+      {
+        id: "integrity",
+        label: "Skor Integritas Dinas",
+        value: String(score),
+        meta: `Kepatuhan SLA ${myDepartment?.slaCompliance || "100.0%"} · Tepat waktu +2 poin`,
+        valueTone: "brand",
+      },
+    ];
+  }, [activeRows, rows, rapor, user?.departmentId]);
 
   const handleCycleRegion = () => {
-    const idx = REGION_CYCLE.indexOf(regionFilter);
-    const next = REGION_CYCLE[(idx + 1) % REGION_CYCLE.length];
-    setRegionFilter(next);
+    const index = REGION_CYCLE.indexOf(regionFilter);
+    setRegionFilter(REGION_CYCLE[(index + 1) % REGION_CYCLE.length]);
   };
 
   const handleResetFilters = () => {
@@ -69,28 +168,75 @@ export function DinasDashboardPage() {
   };
 
   const handleTicketAction = (
-    ticket: DinasTicketRow,
+    ticket: DinasTicketViewRow,
     action: TicketActionItem
   ) => {
     if (action.disabled) return;
     setSelectedAction({ ticket, action });
   };
 
-  const handleConfirmAction = () => {
-    if (!selectedAction) return;
-    showToast({
-      type: "success",
-      title: `${selectedAction.action.label} diproses`,
-      message: `${selectedAction.ticket.id} (${selectedAction.ticket.categoryTitle}) berhasil diperbarui.`,
-    });
-    setSelectedAction(null);
+  const openActionForTicket = (ticketId: string, actionId: DinasActionId) => {
+    const ticket = rows.find((row) => row.id === ticketId);
+    const action = ticket?.actions.find((item) => item.id === actionId);
+    if (!ticket || !action) {
+      showToast({
+        type: "warning",
+        title: "Aksi belum tersedia",
+        message: "Muat ulang antrean untuk memperbarui status tiket ini.",
+      });
+      return;
+    }
+    setSelectedAction({ ticket, action });
   };
 
-  const departmentName =
-    user?.departmentName || DINAS_DEPARTMENT_META.departmentName;
+  const departmentName = user?.departmentName || "Dinas PU Bina Marga & Pematusan";
   const profileLabel = user?.departmentShortName
     ? `Admin · ${user.departmentShortName}`
-    : `Admin · ${DINAS_DEPARTMENT_META.departmentShortName}`;
+    : "Admin · Dinas";
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-bg text-fg flex flex-col">
+        <TopNavbar profileLabel={profileLabel} />
+        <div className="max-w-[1440px] w-full mx-auto flex-1 flex flex-col lg:flex-row">
+          <div className="w-full lg:w-64 shrink-0 border-b lg:border-r border-line p-[18px]">
+            <Skeleton className="h-40 w-full" />
+          </div>
+          <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-5">
+            <Skeleton className="h-8 w-72" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+              {[0, 1, 2, 3].map((index) => (
+                <Skeleton key={index} className="h-28 w-full" />
+              ))}
+            </div>
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-72 w-full" />
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-bg text-fg flex flex-col">
+        <TopNavbar profileLabel={profileLabel} />
+        <main className="max-w-lg w-full mx-auto px-4 py-16">
+          <div className="rounded-2xl border border-line bg-surface p-6 text-center flex flex-col items-center gap-3">
+            <h1 className="font-head font-bold text-xl text-fg">
+              Antrean dinas belum bisa dimuat
+            </h1>
+            <p className="font-sans text-sm text-fg-muted">
+              Periksa koneksi lalu muat ulang data. Sesi dan filter tetap aman.
+            </p>
+            <Button variant="primary" size="md" onClick={loadData}>
+              Muat Ulang
+            </Button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-bg text-fg flex flex-col">
@@ -99,24 +245,26 @@ export function DinasDashboardPage() {
       <div className="max-w-[1440px] w-full mx-auto flex-1 flex flex-col lg:flex-row">
         <DinasSidebar
           departmentName={departmentName}
-          regionLabel={DINAS_DEPARTMENT_META.regionLabel}
-          isVerifiedPartner={DINAS_DEPARTMENT_META.isVerifiedPartner}
-          integrityScore={DINAS_DEPARTMENT_META.integrityScore}
+          regionLabel="Kota Surabaya & Kab. Sidoarjo"
+          isVerifiedPartner
+          integrityScore={
+            rapor?.departments.find((department) => department.id === user?.departmentId)
+              ?.score ?? 80
+          }
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
-          counts={DINAS_QUEUE_COUNTS}
+          counts={counts}
         />
 
         <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 lg:py-7 flex flex-col gap-5">
-          {/* Header / Page Title & Actions */}
           <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex flex-col gap-1 min-w-0">
               <h1 className="font-head font-bold text-2xl md:text-[30px] md:leading-9 text-fg">
                 Meja Kerja Antrean Dinas
               </h1>
               <p className="font-sans text-sm leading-5 text-fg-muted">
-                Tiket diurutkan otomatis dari status Melewati Tenggat dan sisa
-                waktu SLA tersingkat · Sinkronisasi terakhir: baru saja
+                {rows.length} tiket · {counts.OVERDUE} melewati tenggat ·{" "}
+                {counts.DISPUTED} dibantah · {counts.ESCALATED} eskalasi
               </p>
             </div>
 
@@ -125,7 +273,7 @@ export function DinasDashboardPage() {
                 density="dinas"
                 type="search"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Cari lokasi atau #ID tiket..."
                 aria-label="Cari lokasi atau ID tiket"
                 leftIcon={<Search className="size-4" />}
@@ -145,38 +293,26 @@ export function DinasDashboardPage() {
             </div>
           </header>
 
-          {/* 4 KPI Summary Cards */}
-          <StatOverview stats={DINAS_KPI_STATS} />
+          <StatOverview stats={kpiStats} />
 
-          {/* Disputed 24h & Escalated Berita Acara Banners */}
           <AlertBanners
+            disputedTicket={disputedTicket}
+            escalatedTicket={escalatedTicket}
             onProcessRework={(ticketId) =>
-              showToast({
-                type: "info",
-                title: "Proses Perbaikan Ulang",
-                message: `Tiket ${ticketId} dikembalikan ke status Sedang Ditangani (+24 jam buffer).`,
-              })
+              openActionForTicket(ticketId, "reprocess-disputed")
             }
             onAppealEvidence={(ticketId) =>
-              showToast({
-                type: "info",
-                title: "Banding Bukti (1×)",
-                message: `Siapkan foto sudut terbaru (≤75 m) untuk tiket ${ticketId}.`,
-              })
+              openActionForTicket(ticketId, "counter-dispute")
             }
             onUploadEscalation={(ticketId) =>
-              showToast({
-                type: "warning",
-                title: "Dokumen Eskalasi Wajib",
-                message: `Tiket ${ticketId} membutuhkan Berita Acara (PDF/JPG ≤5 MB) dan Foto Live.`,
-              })
+              openActionForTicket(ticketId, "resolve-escalated")
             }
           />
 
-          {/* Status Filter Tabs + Priority Queue Table */}
           <TicketTable
             tickets={filteredTickets}
             activeTab={activeFilter}
+            counts={counts}
             onTabChange={setActiveFilter}
             onAction={handleTicketAction}
             onResetFilters={handleResetFilters}
@@ -184,49 +320,16 @@ export function DinasDashboardPage() {
         </main>
       </div>
 
-      {/* Konfirmasi Aksi Dinas */}
-      <Modal
+      <DinasActionModal
         open={Boolean(selectedAction)}
+        ticket={selectedAction?.ticket ?? null}
+        action={selectedAction?.action ?? null}
+        currentDepartmentId={user?.departmentId}
+        accessToken={accessToken}
+        isJuryMode={isJuryMode}
         onClose={() => setSelectedAction(null)}
-        title={
-          selectedAction
-            ? `${selectedAction.action.label} — ${selectedAction.ticket.id}`
-            : undefined
-        }
-        description={
-          selectedAction
-            ? `${selectedAction.ticket.categoryTitle} · ${selectedAction.ticket.location}`
-            : undefined
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <p className="font-sans text-sm text-fg-muted">
-            Tindakan ini akan dicatat ke rantai audit kriptografi{" "}
-            <span className="font-mono text-xs text-fg">AuditLog</span> dan
-            memperbarui status antrean dinas secara langsung.
-          </p>
-          <div className="flex items-center justify-end gap-2.5 pt-2">
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => setSelectedAction(null)}
-            >
-              Batal
-            </Button>
-            <Button
-              variant={
-                selectedAction?.action.variant === "danger"
-                  ? "danger"
-                  : "primary"
-              }
-              size="md"
-              onClick={handleConfirmAction}
-            >
-              Konfirmasi {selectedAction?.action.label}
-            </Button>
-          </div>
-        </div>
-      </Modal>
+        onSuccess={loadData}
+      />
     </div>
   );
 }

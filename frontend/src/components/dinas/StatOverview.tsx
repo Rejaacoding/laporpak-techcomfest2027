@@ -1,5 +1,5 @@
 import { Card } from "../ui/index.js";
-import type { KpiStatItem } from "../../data/mockTickets.ts";
+import type { KpiStatItem } from "../../lib/ticketMappers.ts";
 
 export interface StatOverviewProps {
   stats: KpiStatItem[];

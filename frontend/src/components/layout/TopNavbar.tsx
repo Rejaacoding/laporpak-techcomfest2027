@@ -27,7 +27,7 @@ const DEFAULT_NAV_ITEMS: TopNavbarNavItem[] = [
   { to: "/", label: "Peta Laporan" },
   { to: "/lapor", label: "Buat Laporan", citizenOnly: true },
   { to: "/dinas", label: "Antrean Dinas", roles: ["ADMIN_DINAS"] },
-  { to: "/rapor", label: "Rapor Publik" },
+  { to: "/rapor", label: "Catatan Kerja" },
 ];
 
 /**
