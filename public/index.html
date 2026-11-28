@@ -3,28 +3,54 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LaporPAK! | Platform Pelaporan Infrastruktur & Audit Publik Dua Arah</title>
-    <meta
-      name="description"
-      content="LaporPAK! — Platform Web Pelayanan Publik & Tata Kelola Pemerintahan Berbasis Peta Interaktif, Public SLA, dan Validasi Warga Sekitar (Techcomfest 2027 - SDG 16)."
-    />
-    <meta name="theme-color" content="#0F172A" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
-    />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
-    <script type="module" crossorigin src="/assets/index-B6Q0Hm7b.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/vendor-C5_C4QSf.js">
-    <link rel="modulepreload" crossorigin href="/assets/icons-DYkkfEJf.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-dghD2d73.css">
+    <title>LaporPAK! — Server API Lokal</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #fffbf5;
+        color: #1c1917;
+      }
+      main {
+        max-width: 520px;
+        background: #ffffff;
+        border: 1px solid #e7dfd3;
+        border-radius: 16px;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+      p {
+        margin: 8px 0;
+        line-height: 1.5;
+        color: #57534e;
+      }
+      code {
+        background: #fef3e2;
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+    </style>
   </head>
-  <body class="bg-slate-50 font-sans text-slate-900 antialiased selection:bg-blue-700 selection:text-white">
-    <div id="root"></div>
+  <body>
+    <main>
+      <h1>Backend LaporPAK! aktif di port 5050</h1>
+      <p>
+        Mode pengembangan frontend berjalan terpisah lewat Vite. Jalankan
+        <code>npm --prefix frontend run dev</code> lalu buka
+        <a href="http://localhost:5173">http://localhost:5173</a>.
+      </p>
+      <p>
+        Untuk menjalankan frontend produksi dari port ini, jalankan
+        <code>npm run build</code> lebih dulu.
+      </p>
+    </main>
   </body>
 </html>
