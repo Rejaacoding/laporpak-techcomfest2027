@@ -9,7 +9,7 @@
 - [x] **Penguatan Anti-Buzzer v3.5 (`#33`–`#37`):** Cooling window `6 jam`, jangkar saksi awal (`2.0` vs `3.0` poin), shadow-zero anti-kolusi, penanda *fast resolve anomaly* `< 10 menit`, `DepartmentRating` + API rating.
 - [x] **Kamera & Panel Simulasi Juri (`US-009`, `US-010`):** `LiveCameraCapture.jsx` (blokir virtual camera, watermark koordinat, kecerahan BT.601 siang `35` / malam `12`, NSFWJS client + server guard) & `JuryPanel.jsx` `5` alat + 16 foto `.webp` kalibrasi + PDF sample.
 - [x] **Seluruh 9 Halaman Frontend Live (`US-008`, `US-011`, `US-013`, `US-014`, `US-015`):** `/`, `/peta`, `/lapor`, `/tiket/:id`, `/catatan`, `/login`, `/dinas`, `/dinas/peta`, `/dinas/catatan`, ditambah `ProfileDrawer` global dan 7/7 unit test frontend + `tsc --noEmit` 0 error.
-- [x] **Peta Nyata, Live Sync, Upstash Redis & Hardening (`ff6e639`..`b98c8fa`):** 6 halaman peta pakai `CivicLeafletMap` (Esri + OSM fallback), `useLiveSync`, cache versioning O(1) & Redis pipeline, code-splitting entry JS (`85.39 kB`), CSP/security headers di `vercel.json`, audit endpoint live.
+- [x] **Peta Nyata, Live Sync, Upstash Redis & Hardening (`ff6e639`..terkini):** 6 halaman peta pakai `CivicLeafletMap` (Esri + OSM fallback), `useLiveSync`, cache versioning O(1) & Redis pipeline, code-splitting entry JS (`85.39 kB`), CSP/security headers di `vercel.json`, `/api/cron/sla` fail-closed, rate limiter mutasi non-juri, scrub `?jury_token=`, dan audit endpoint live (`17/17` self-check).
 
 ## Belum Selesai / Remaining Gaps (`[ ]`)
 - [ ] **Aset Maskot (`public/mascots/`):** Ilustrasi orisinal *Cak Pantau* & *Mas Sigap* belum ditambahkan ke repo (script build copy di `package.json` sudah siap).

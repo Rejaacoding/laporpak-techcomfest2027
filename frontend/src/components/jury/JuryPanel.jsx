@@ -71,6 +71,10 @@ export default function JuryPanel({
         } catch (err) {
           setErrorMsg(err.message);
         } finally {
+          params.delete('jury_token');
+          const cleanSearch = params.toString();
+          const cleanUrl = `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}${window.location.hash}`;
+          window.history.replaceState({}, '', cleanUrl);
           setLoading(false);
         }
       }

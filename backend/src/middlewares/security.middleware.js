@@ -135,3 +135,24 @@ export const enforceCronRateLimit = makeIpRateLimiter({
   windowSeconds: 300,
   errorMessage: "Terlalu banyak permintaan evaluasi SLA terjadwal.",
 });
+
+export async function enforceMutationRateLimit(req, _res, next) {
+  try {
+    if (req.isJuryMode) return next();
+    const actor = req.user?.id || req.clientIp || getTrustedClientIp(req) || "unknown";
+    const safeActor = String(actor).replace(/[^a-zA-Z0-9.:_-]/g, "_");
+    const count = await redis.incrWithTtl(`rl:mut:${safeActor}`, 60);
+    if (count > 30) {
+      return next(
+        new AppError(
+          429,
+          "RATE_LIMITED",
+          "Terlalu banyak pengiriman dalam 1 menit. Tunggu sebentar lalu coba lagi."
+        )
+      );
+    }
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+}

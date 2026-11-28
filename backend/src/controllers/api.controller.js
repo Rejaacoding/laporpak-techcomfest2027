@@ -384,11 +384,15 @@ export async function aktivasiMitraController(req, res, next) {
       throw new AppError(409, "VERSION_CONFLICT", "Kode aktivasi mitra sekali pakai ini sudah pernah digunakan.");
     }
 
+    const callerMatchesTargetEmail =
+      req.user && String(req.user.email || "").toLowerCase() === normalizedEmail;
     const aliasName = body.aliasName || `Mitra-${departmentId}-${crypto.randomInt(100, 999)}`;
     const user = await prisma.user.upsert({
       where: { email: normalizedEmail },
       create: {
-        id: req.user?.id || `mitra_${crypto.randomBytes(8).toString("hex")}`,
+        id: callerMatchesTargetEmail
+          ? req.user.id
+          : `mitra_${crypto.randomBytes(8).toString("hex")}`,
         email: normalizedEmail,
         aliasName,
         role: "ADMIN_DINAS",
@@ -433,19 +437,8 @@ export async function cronSlaController(req, res, next) {
     } else if (isHostedProduction()) {
       const serverSecret = process.env.SERVER_SECRET?.trim();
       const hasValidServerBearer = Boolean(serverSecret && bearer && safeEqual(bearer, serverSecret));
-      const isVercelCronUa = req.header("user-agent") === "vercel-cron/1.0";
-      if (!hasValidServerBearer && !req.isJuryMode && !isVercelCronUa) {
-        throw new AppError(401, "UNAUTHORIZED", "Endpoint cron hanya dapat dipicu oleh scheduler resmi.");
-      }
-      if (isVercelCronUa && !hasValidServerBearer) {
-        const acquired = await redis.setNx("cron:sla:prod:lock", "1", 600);
-        if (!acquired) {
-          return okResponse(
-            res,
-            { evaluatedAt: new Date().toISOString(), skippedByThrottle: true },
-            "Evaluasi SLA baru saja dijalankan."
-          );
-        }
+      if (!hasValidServerBearer) {
+        throw new AppError(401, "UNAUTHORIZED", "Endpoint cron wajib memakai Bearer CRON_SECRET.");
       }
     }
 

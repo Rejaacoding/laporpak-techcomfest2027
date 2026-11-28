@@ -34,6 +34,7 @@ import {
   enforceCaptureNonceRateLimit,
   enforceCronRateLimit,
   enforceJurySessionBruteForceGuard,
+  enforceMutationRateLimit,
   enforceRadiusCheckRateLimit,
   enforceSignedMediaRateLimit,
 } from "../middlewares/security.middleware.js";
@@ -61,10 +62,10 @@ router.get("/rapor", raporController);
 
 // 3. Kamera & Aksi Warga (4 endpoint)
 router.post("/capture-nonce", requireAuth, enforceCaptureNonceRateLimit, captureNonceController);
-router.post("/tickets", requireRole("WARGA"), enforceJuryMutationRateLimit, createTicketController);
-router.post("/tickets/:id/support", requireRole("WARGA"), enforceJuryMutationRateLimit, supportTicketController);
-router.post("/tickets/:id/validate", requireRole("WARGA"), enforceJuryMutationRateLimit, validateTicketController);
-router.post("/tickets/:id/rate", requireRole("WARGA"), enforceJuryMutationRateLimit, rateTicketController);
+router.post("/tickets", requireRole("WARGA"), enforceMutationRateLimit, enforceJuryMutationRateLimit, createTicketController);
+router.post("/tickets/:id/support", requireRole("WARGA"), enforceMutationRateLimit, enforceJuryMutationRateLimit, supportTicketController);
+router.post("/tickets/:id/validate", requireRole("WARGA"), enforceMutationRateLimit, enforceJuryMutationRateLimit, validateTicketController);
+router.post("/tickets/:id/rate", requireRole("WARGA"), enforceMutationRateLimit, enforceJuryMutationRateLimit, rateTicketController);
 
 // 4. Meja Kerja Instansi ADMIN_DINAS (2 rute grup: antrean + 8 aksi dinas)
 router.get("/dinas/tickets", requireRole("ADMIN_DINAS"), listDinasTicketsController);
@@ -81,6 +82,7 @@ for (const action of [
   router.post(
     `/tickets/:id/${action}`,
     requireRole("ADMIN_DINAS"),
+    enforceMutationRateLimit,
     enforceJuryMutationRateLimit,
     makeDinasActionController(action)
   );

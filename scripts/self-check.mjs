@@ -49,7 +49,9 @@ async function runTests() {
   await Promise.all([
     redis.deleteByPrefix("rl:warga:"),
     redis.deleteByPrefix("rl:jury:"),
+    redis.deleteByPrefix("rl:mut:"),
     redis.deleteByPrefix("rl:ip:jury_session:"),
+    redis.deleteByPrefix("rl:ip:cron_sla:"),
     redis.deleteByPrefix("cache:"),
   ]);
   await seedDemoData(prisma, { resetOnlyDemo: true });
@@ -683,12 +685,24 @@ async function runTests() {
 
   const prevVercel = process.env.VERCEL;
   const prevJuryEnv = process.env.JURY_SECRET_TOKEN;
+  const prevCronEnv = process.env.CRON_SECRET;
   try {
     process.env.VERCEL = "1";
     const devOnVercel = await req("GET", "/api/auth/me", {
       headers: { "X-Dev-User-Id": "demo-warga-pelapor" },
     });
     assert.equal(devOnVercel.status, 401, "X-Dev-User-Id must NEVER work when VERCEL env is set");
+
+    delete process.env.CRON_SECRET;
+    const cronSpoofUa = await req("GET", "/api/cron/sla", {
+      headers: { "User-Agent": "vercel-cron/1.0" },
+    });
+    assert.equal(cronSpoofUa.status, 401, "/api/cron/sla must reject spoofed vercel-cron UA when CRON_SECRET is unset");
+
+    const cronJuryBypass = await req("GET", "/api/cron/sla", {
+      headers: { "X-Jury-Token": juryToken },
+    });
+    assert.equal(cronJuryBypass.status, 401, "/api/cron/sla must reject jury token in production");
 
     delete process.env.JURY_SECRET_TOKEN;
     const { getJurySecret } = await import("../backend/src/lib/crypto.js");
@@ -697,7 +711,23 @@ async function runTests() {
     if (prevVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = prevVercel;
     if (prevJuryEnv !== undefined) process.env.JURY_SECRET_TOKEN = prevJuryEnv;
+    if (prevCronEnv !== undefined) process.env.CRON_SECRET = prevCronEnv;
   }
+
+  let mutRateLimited = false;
+  for (let i = 0; i < 35; i++) {
+    const mutAttempt = await req("POST", "/api/tickets", {
+      headers: { "X-Dev-User-Id": "demo-warga-pelapor" },
+      body: {},
+    });
+    if (mutAttempt.status === 429) {
+      mutRateLimited = true;
+      break;
+    }
+  }
+  assert.equal(mutRateLimited, true, "Mutation rate limiter must trigger 429 after 30 requests/min");
+  await redis.deleteByPrefix("rl:mut:");
+  await redis.deleteByPrefix("rl:ip:cron_sla:");
 
   let rateLimited = false;
   for (let i = 0; i < 11; i++) {
@@ -752,7 +782,9 @@ async function runTests() {
   await prisma.user.deleteMany({ where: { email: "mitra.baru.pu@laporpak.id" } });
   await redis.del("mitra:used:MITRA-PU-2027");
 
-  const cronRes = await req("GET", "/api/cron/sla");
+  const cronRes = await req("GET", "/api/cron/sla", {
+    headers: process.env.CRON_SECRET ? { Authorization: `Bearer ${process.env.CRON_SECRET}` } : {},
+  });
   assert.equal(cronRes.status, 200);
   assert.ok(cronRes.json.data.evaluatedAt);
   console.log("PASS [16/17] 16 Calibrated Sample Photos (#32), Single-Use /api/aktivasi-mitra (US-002) & /api/cron/sla (US-004)");

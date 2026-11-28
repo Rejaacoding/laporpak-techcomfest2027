@@ -9,6 +9,7 @@
   - Upgrade Redis `/pipeline` atomik & cache versioning O(1) (`cv:public`); cache JWT Supabase, profil + UUID alias `ADMIN_DINAS`, `/api/tickets`, `/api/rapor`, `/api/dinas/tickets`, `/api/tickets/:id`, `/api/tickets/check-radius`, dan signed URL (menurunkan latensi warm endpoint dari ~1–1.8 detik ke ~60–85 ms).
   - Tutup celah audit keamanan: `/api/cron/sla` butuh bearer/cron guard (`401`), `/api/aktivasi-mitra` dikunci di produksi (`403`), foto karantina spam dibatasi `ADMIN_DINAS`, IP rate limit pakai trusted Vercel header, CSP + security header aktif di `vercel.json`, dan redirect backslash diblokir di `LoginPage.tsx`.
   - Code-splitting route (`React.lazy`) + `manualChunks` memangkas entry JS awal dari `801.53 kB` ke `85.39 kB`, ditambah deduplikasi `GET` in-flight di `api.js`.
+- **Hardening Keamanan Lanjutan:** `/api/cron/sla` kini *fail-closed* di produksi (wajib bearer `CRON_SECRET`/`SERVER_SECRET`, tanpa bypass `User-Agent` atau token juri), rate limiter mutasi non-juri (`30 req/menit/aktor`) terpasang di seluruh aksi warga & dinas, `?jury_token=` otomatis dibersihkan dari URL (`history.replaceState`) di `JuryPanel.jsx`, dan potensi bentrok ID pada `aktivasiMitraController` ditutup.
 - **Cleanup (`b98c8fa`):** Sinkronisasi `README.md`, `docs/tasks.md`, `.env.example`, perbaiki `public/index.html` dev fallback, dan tambah favicon SVG inline di `frontend/index.html`.
 
 ## Branch & Status Tim
